@@ -1,0 +1,8 @@
+.idea
+__pycache__
+jupyter_notebooks
+saved
+temp
+
+*.ipynb*
+*.pyc
