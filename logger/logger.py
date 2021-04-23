@@ -5,10 +5,9 @@ from pathlib import Path
 
 import nibabel as nib
 import numpy as np
-import torch
 from tvtk.api import tvtk, write_data
 
-from utils import calc_norm, read_json
+from utils import read_json
 
 
 def setup_logging(save_dir, log_config='logger/logger_config.json', default_level=logging.INFO):
@@ -29,19 +28,6 @@ def setup_logging(save_dir, log_config='logger/logger_config.json', default_leve
     else:
         print("Warning: logging configuration file is not found in {}.".format(log_config))
         logging.basicConfig(level=default_level)
-
-
-def print_log(logger, log):
-    """
-    print logged scalars
-    """
-
-    for key, value in log.items():
-        if 'DSC' not in key and 'ASD' not in key and 'GMM' not in key and 'test' not in key:
-            if isinstance(value, int):
-                logger.info(f'    {key:50s}: {value}')
-            else:
-                logger.info(f'    {key:50s}: {value:.5f}')
 
     print()
 
@@ -112,16 +98,41 @@ def save_im_to_disk(im, file_path, spacing=(1, 1, 1)):
     im.to_filename(file_path)
 
 
-def save_optimiser_to_disk(optimiser, file_path):
-    """
-    save an optimiser state to a .pth file
+"""
+(vector) fields
+"""
 
-    :param optimiser: optimiser
-    :param file_path: path to use
+
+def save_field(im_pair_idx, save_dirs, spacing, field, field_name, model=None):
+    folder = save_dirs['samples'] / model if model is not None else save_dirs['fields']
+    field_path = path.join(folder, field_name + '_' + str(im_pair_idx) + '.vtk')
+    save_field_to_disk(field, field_path, spacing)
+
+
+def save_fields(im_pair_idxs, save_dirs, spacing, **kwargs):
+    for field_name, field_batch in kwargs.items():
+        field_batch = field_batch * spacing[0]
+        field_batch = field_batch.cpu().numpy()
+
+        for loop_idx, im_pair_idx in enumerate(im_pair_idxs):
+            field_norm = field_batch[loop_idx]
+            save_field(save_dirs, im_pair_idx, field_norm, spacing, field_name)
+
+
+"""
+grids
+"""
+
+
+def save_grids(im_pair_idxs, save_dirs, grids):
+    """
+    save output structured grids to .vtk
     """
 
-    state_dict = optimiser.state_dict()
-    torch.save(state_dict, file_path)
+    for loop_idx, im_pair_idx in enumerate(im_pair_idxs):
+        grid_path = path.join(save_dirs['grids'], 'grid_' + str(im_pair_idx) + '.vtk')
+        grid = grids[loop_idx]
+        save_grid_to_disk(grid, grid_path)
 
 
 """
@@ -129,101 +140,40 @@ images
 """
 
 
-def save_im(save_dirs_dict, im_pair_idx, im, spacing, name, sample=False):
-    folder = save_dirs_dict['samples'] if sample else save_dirs_dict['images']
+def save_im(im_pair_idx, save_dirs, spacing, im, name, model=None):
+    folder = save_dirs['samples'] / model if model is not None else save_dirs['images']
     im_path = path.join(folder, name + '_' + str(im_pair_idx) + '.nii.gz')
-
-    if not path.exists(im_path) or name == 'im_moving_warped':
-        save_im_to_disk(im, im_path, spacing)
+    save_im_to_disk(im, im_path, spacing)
 
 
-def save_images(data_loader, im_pair_idxs, **kwargs):
+def save_fixed_im(save_dirs, spacing, im_fixed):
     """
-    save input and output images to .nii.gz
+    save the input fixed image to .nii.gz
     """
 
-    save_dirs_dict = data_loader.save_dirs
-    spacing = data_loader.dataset.spacing
-
-    for im_name, im_batch in kwargs.items():
-        if im_batch.type() in {'torch.BoolTensor', 'torch.cuda.BoolTensor',
-                               'torch.ShortTensor', 'torch.cuda.ShortTensor'}:
-            im_batch = im_batch.float()
-
-        im_batch = im_batch.cpu().numpy()
-
-        for loop_idx, im_pair_idx in enumerate(im_pair_idxs.tolist()):
-            im = im_batch[loop_idx, 0]
-            save_im(save_dirs_dict, im_pair_idx, im, spacing, im_name)
+    im_fixed = im_fixed[0, 0].cpu().numpy()
+    im_path = path.join(save_dirs['images'], 'im_fixed.nii.gz')
+    save_im_to_disk(im_fixed, im_path, spacing)
 
 
-"""
-vector field norms
-"""
-
-
-def save_norm(save_dirs_dict, im_pair_idx, norm, spacing, name):
-    norm_path = path.join(save_dirs_dict['norms'], name + '_norm_' + str(im_pair_idx) + '.nii.gz')
-    save_im_to_disk(norm, norm_path, spacing)
-
-
-def save_norms(data_loader, im_pair_idxs, **kwargs):
+def save_fixed_mask(save_dirs, spacing, mask_fixed):
     """
-    save input and output images to .nii.gz
+    save the input fixed image to .nii.gz
     """
 
-    save_dirs_dict = data_loader.save_dirs
-    spacing = data_loader.dataset.spacing
-
-    for field_name, field_batch in kwargs.items():
-        field_batch = calc_norm(field_batch * spacing[0])
-        field_batch = field_batch.cpu().numpy()
-
-        for loop_idx, im_pair_idx in enumerate(im_pair_idxs.tolist()):
-            field_norm = field_batch[loop_idx, 0]
-            save_norm(save_dirs_dict, im_pair_idx, field_norm, spacing, field_name)
+    mask_fixed = mask_fixed[0, 0].float().cpu().numpy()
+    im_path = path.join(save_dirs['images'], 'mask_fixed.nii.gz')
+    save_im_to_disk(mask_fixed, im_path, spacing)
 
 
-"""
-vector fields
-"""
-
-
-def save_field(save_dirs_dict, im_pair_idx, field, spacing, field_name, sample=False):
-    folder = save_dirs_dict['samples'] if sample else save_dirs_dict['fields']
-    field_path = path.join(folder, field_name + '_' + str(im_pair_idx) + '.vtk')
-    save_field_to_disk(field, field_path, spacing)
-
-
-def save_fields(data_loader, im_pair_idxs, **kwargs):
-    save_dirs_dict = data_loader.save_dirs
-    spacing = data_loader.dataset.spacing
-
-    for field_name, field_batch in kwargs.items():
-        field_batch = field_batch * spacing[0]
-        field_batch = field_batch.cpu().numpy()
-
-        for loop_idx, im_pair_idx in enumerate(im_pair_idxs.tolist()):
-            field_norm = field_batch[loop_idx]
-            save_field(save_dirs_dict, im_pair_idx, field_norm, spacing, field_name)
-
-
-"""
-transformation grids
-"""
-
-
-def save_grids(data_loader, im_pair_idxs, grids):
+def save_moving_im(im_pair_idxs, save_dirs, spacing, im_moving_batch):
     """
-    save output structured grids to .vtk
+    save input moving images to .nii.gz
     """
 
-    save_dirs_dict = data_loader.save_dirs
-
-    for loop_idx, im_pair_idx in enumerate(im_pair_idxs.tolist()):
-        grid_path = path.join(save_dirs_dict['grids'], 'grid_' + str(im_pair_idx) + '.vtk')
-        grid = grids[loop_idx]
-        save_grid_to_disk(grid, grid_path)
+    for loop_idx, im_pair_idx in enumerate(im_pair_idxs):
+        im_moving = im_moving_batch[loop_idx, 0].cpu().numpy()
+        save_im(im_pair_idx, save_dirs, spacing, im_moving, 'im_moving')
 
 
 """
@@ -231,24 +181,27 @@ samples
 """
 
 
-def save_sample(data_loader, im_pair_idxs, sample_no, im_moving_warped_batch, displacement_batch, model='MCMC'):
+def save_sample(im_pair_idxs, save_dirs, spacing, sample_no, im_moving_warped_batch, displacement_batch, log_det_J_batch, model):
     """
-    save output images and vector fields related to a sample from MCMC
+    save output images and vector fields related to a sample from VI or MCMC
     """
-
-    save_dirs_dict = data_loader.save_dirs
-    spacing = data_loader.dataset.spacing
 
     im_moving_warped_batch = im_moving_warped_batch.cpu().numpy()
 
     displacement_batch = displacement_batch * spacing[0]
     displacement_batch = displacement_batch.cpu().numpy()
 
-    for loop_idx, im_pair_idx in enumerate(im_pair_idxs.tolist()):
+    log_det_J_batch = log_det_J_batch.cpu().numpy()
+
+    for loop_idx, im_pair_idx in enumerate(im_pair_idxs):
         im_moving_warped = im_moving_warped_batch[loop_idx, 0]
-        name = 'sample_' + model + '_' + str(sample_no) + '_im_moving_warped'
-        save_im(save_dirs_dict, im_pair_idx, im_moving_warped, spacing, name, sample=True)
+        name = 'sample_' + f'{sample_no:06}' + '_im_moving_warped'
+        save_im(im_pair_idx, save_dirs, spacing, im_moving_warped, name, model)
 
         displacement = displacement_batch[loop_idx]
-        name = 'sample_' + model + '_' + str(sample_no) + '_displacement'
-        save_field(save_dirs_dict, im_pair_idx, displacement, spacing, name, sample=True)
+        name = 'sample_' + f'{sample_no:06}' + '_displacement'
+        save_field(im_pair_idx, save_dirs, spacing, displacement, name, model)
+
+        log_det_J = log_det_J_batch[loop_idx]
+        name = 'sample_' + f'{sample_no:06}' + '_log_det_J'
+        save_im(im_pair_idx, save_dirs, spacing, log_det_J, name, model)

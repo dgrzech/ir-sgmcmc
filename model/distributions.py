@@ -4,7 +4,7 @@ import torch
 from torch import nn
 
 """
-Useful distributions
+useful distributions
 """
 
 
@@ -29,7 +29,7 @@ class NormalDistribution(nn.Module):
             loc_is_float = False
 
         if loc_is_float:
-            loc = torch.Tensor([loc])
+            loc = torch.tensor(loc)
         else:
             if len(loc) != 1:
                 raise ValueError("Invalid tensor size. Expected 1, got: {}".format(len(loc)))
@@ -43,18 +43,18 @@ class NormalDistribution(nn.Module):
             scale_is_float = False
 
         if scale_is_float:
-            scale = torch.Tensor([scale])
+            scale = torch.tensor(scale)
         else:
             if len(scale) != 1:
                 raise ValueError("Invalid tensor size. Expected 1, got: {}".format(len(scale)))
             scale = scale.clone()
 
         self.loc = nn.Parameter(loc.detach(), requires_grad=learnable)
-        self.log_scale = nn.Parameter(torch.log(scale).detach(), requires_grad=learnable)
-        self.register_buffer('_log_sqrt_2pi', (torch.log(torch.Tensor([math.pi * 2.0])) / 2.0).detach())
+        self.log_scale = nn.Parameter(scale.log().detach(), requires_grad=learnable)
+        self.register_buffer('_log_sqrt_2pi', torch.tensor(0.5 * math.log(2.0 * math.pi)))
 
     def forward(self, x):
-        E = ((x - self.loc) * torch.exp(-self.log_scale)) ** 2 / 2.0
+        E = 0.5 * ((x - self.loc) * torch.exp(-1.0 * self.log_scale)) ** 2
         return -E - self.log_scale - self._log_sqrt_2pi
 
 
@@ -81,7 +81,7 @@ class _GammaDistribution(nn.Module):
             shape_is_float = False
 
         if shape_is_float:
-            self.shape = nn.Parameter(torch.Tensor([shape]), requires_grad=shape_learnable)
+            self.shape = nn.Parameter(torch.tensor(shape), requires_grad=shape_learnable)
         else:
             if len(shape) != 1:
                 raise ValueError("Invalid tensor size. Expected 1, got: {}".format(len(shape)))
@@ -95,7 +95,7 @@ class _GammaDistribution(nn.Module):
             rate_is_float = False
 
         if rate_is_float:
-            self.rate = nn.Parameter(torch.Tensor([rate]), requires_grad=rate_learnable)
+            self.rate = nn.Parameter(torch.tensor(rate), requires_grad=rate_learnable)
         else:
             if len(rate) != 1:
                 raise ValueError("Invalid tensor size. Expected 1, got: {}".format(len(rate)))
@@ -109,7 +109,7 @@ class _GammaDistribution(nn.Module):
 
 
 def gamma_log_pdf(log_x, shape, rate):
-    return shape * torch.log(rate) + (shape - 1) * log_x - rate * torch.exp(log_x) - torch.lgamma(shape)
+    return shape * torch.log(rate) + (shape - 1) * log_x - rate * log_x.exp() - torch.lgamma(shape)
 
 
 class _InverseGammaDistribution(nn.Module):
@@ -132,7 +132,7 @@ class _InverseGammaDistribution(nn.Module):
         return self.gamma_distribution.rate / (self.gamma_distribution.shape - 1)
 
     def forward(self, log_x):
-        return self.gamma_distribution(-log_x) - 2 * log_x
+        return self.gamma_distribution(-1.0 * log_x) - 2.0 * log_x
 
 
 class ExpInverseGammaDistribution(nn.Module):
@@ -189,7 +189,7 @@ class DirichletPrior(nn.Module):
         super(DirichletPrior, self).__init__()
 
         if alpha is None:
-            alpha = .5
+            alpha = 0.5
 
         is_float = True
 
@@ -233,10 +233,10 @@ class LogEnergyExpGammaPrior(nn.Module):
     def __init__(self, w_reg, dof, nu=1.0, learnable=False):
         super(LogEnergyExpGammaPrior, self).__init__()
 
-        self.register_buffer('w_reg', torch.Tensor([w_reg]))  # never learnable
-        self.register_buffer('dof', torch.Tensor([dof]))  # never learnable
+        self.nu = nn.Parameter(torch.tensor(nu), requires_grad=learnable)
 
-        self.nu = nn.Parameter(torch.Tensor([nu]), requires_grad=learnable)
+        self.register_buffer('w_reg', torch.tensor(w_reg))  # never learnable
+        self.register_buffer('dof', torch.tensor(dof))  # never learnable
 
     def expectation(self):
         return expgamma_expectation(0.5 * self.nu * self.dof, 0.5 * self.nu * self.w_reg)

@@ -1,10 +1,10 @@
 import json
-import math
 from collections import OrderedDict
 from itertools import repeat
 from pathlib import Path
 
 import SimpleITK as sitk
+import math
 import numpy as np
 import pandas as pd
 import torch
@@ -39,21 +39,20 @@ def inf_loop(data_loader):
         yield from loader
 
 
-def add_noise_uniform(field, alpha):
-    return field + get_noise_uniform(field, alpha)
+def add_noise_uniform_field(field, alpha):
+    return field + transform_coordinates(get_noise_uniform(field.shape, field.device, alpha))
 
 
 def add_noise_Langevin(field, sigma, tau):
     return field + get_noise_Langevin(sigma, tau)
 
 
-def get_noise_uniform(field, alpha):
-    epsilon = -2.0 * alpha * torch.rand(field.shape, device=field.device) + alpha
-    return transform_coordinates(epsilon)
+def get_noise_uniform(shape, device, alpha):
+    return -2.0 * alpha * torch.rand(shape, device=device) + alpha
 
 
 def get_noise_Langevin(sigma, tau):
-    eps = torch.randn(sigma.shape, device=sigma.device)
+    eps = torch.randn_like(sigma)
     return math.sqrt(2.0 * tau) * sigma * eps
 
 
@@ -79,19 +78,52 @@ def calc_det_J(nabla):
     return det_J
 
 
-def calc_metrics(seg_fixed, seg_moving, structures_dict, spacing):
+@torch.no_grad()
+def calc_DSC_GPU(im_pair_idxs, seg_fixed, seg_moving, structures_dict):
+    """
+    calculate the Dice scores
+    """
+
+    DSC_batch = dict()  # dict. with Dice scores for each image pair and segmentation
+
+    for idx, im_pair in enumerate(im_pair_idxs):
+        DSC = dict()  # dict. with Dice scores for the image pair
+
+        seg_fixed_im_pair = seg_fixed[idx]
+        seg_moving_im_pair = seg_moving[idx]
+
+        for structure in structures_dict:
+            label = structures_dict[structure]
+
+            numerator = 2.0 * ((seg_fixed_im_pair == label) * (seg_moving_im_pair == label)).sum().item()
+            denominator = (seg_fixed_im_pair == label).sum().item() + (seg_moving_im_pair == label).sum().item()
+
+            score = numerator / denominator
+            DSC[structure] = score
+
+        DSC_batch[im_pair] = DSC
+
+    return DSC_batch
+
+
+@torch.no_grad()
+def calc_metrics(im_pair_idxs, seg_fixed, seg_moving, structures_dict, spacing, GPU=True):
     """
     calculate average surface distances and Dice scores
     """
 
-    ASD = dict()
-    DSC = dict()
-
     hausdorff_distance_filter = sitk.HausdorffDistanceImageFilter()
-    overlap_measures_filter = sitk.LabelOverlapMeasuresImageFilter()
 
-    seg_fixed_arr = seg_fixed.squeeze().cpu().numpy()
-    seg_moving_arr = seg_moving.squeeze().cpu().numpy()
+    ASD, DSC = torch.zeros(len(im_pair_idxs), len(structures_dict), device=seg_fixed.device), \
+               torch.zeros(len(im_pair_idxs), len(structures_dict), device=seg_fixed.device)
+
+    if GPU:
+        DSCs = calc_DSC_GPU(im_pair_idxs, seg_fixed, seg_moving, structures_dict)
+    else:
+        overlap_measures_filter = sitk.LabelOverlapMeasuresImageFilter()
+
+    seg_fixed_arr = seg_fixed[0].squeeze().cpu().numpy()
+    seg_moving = seg_moving.cpu().numpy()
     spacing = spacing.numpy().tolist()
 
     def calc_ASD(seg_fixed_im, seg_moving_im):
@@ -105,22 +137,39 @@ def calc_metrics(seg_fixed, seg_moving, structures_dict, spacing):
         overlap_measures_filter.Execute(seg_fixed_im, seg_moving_im)
         return overlap_measures_filter.GetDiceCoefficient()
 
-    for structure in structures_dict:
-        label = structures_dict[structure]
+    for loop_idx, im_pair_idx in enumerate(im_pair_idxs):
+        seg_moving_arr = seg_moving[loop_idx].squeeze()
 
-        seg_fixed_structure = np.where(seg_fixed_arr == label, 1, 0)
-        seg_moving_structure = np.where(seg_moving_arr == label, 1, 0)
+        for structure_idx, structure_name in enumerate(structures_dict):
+            label = structures_dict[structure_name]
 
-        seg_fixed_im = sitk.GetImageFromArray(seg_fixed_structure)
-        seg_moving_im = sitk.GetImageFromArray(seg_moving_structure)
+            seg_fixed_structure = np.where(seg_fixed_arr == label, 1, 0)
+            seg_moving_structure = np.where(seg_moving_arr == label, 1, 0)
 
-        seg_fixed_im.SetSpacing(spacing)
-        seg_moving_im.SetSpacing(spacing)
+            seg_fixed_im = sitk.GetImageFromArray(seg_fixed_structure)
+            seg_moving_im = sitk.GetImageFromArray(seg_moving_structure)
 
-        ASD[structure] = calc_ASD(seg_fixed_im, seg_moving_im)
-        DSC[structure] = calc_DSC(seg_fixed_im, seg_moving_im)
+            seg_fixed_im.SetSpacing(spacing)
+            seg_moving_im.SetSpacing(spacing)
+
+            try:
+                ASD[loop_idx, structure_idx] = calc_ASD(seg_fixed_im, seg_moving_im)
+            except:
+                ASD[loop_idx, structure_idx] = np.inf
+
+            if GPU:
+                DSC[loop_idx, structure_idx] = DSCs[im_pair_idx][structure_name]
+            else:
+                DSC[loop_idx, structure_idx] = calc_DSC(seg_fixed_im, seg_moving_im)
 
     return ASD, DSC
+
+
+def calc_no_non_diffeomorphic_voxels(transformation, diff_op):
+    nabla = diff_op(transformation, transformation=True)
+    log_det_J_transformation = torch.log(calc_det_J(nabla))
+    return torch.sum(torch.isnan(log_det_J_transformation), dim=(1, 2, 3)), log_det_J_transformation
+
 
 def calc_norm(field):
     """
@@ -135,6 +184,10 @@ def calc_norm(field):
     return norms
 
 
+def get_log_path_from_run_ID(save_path, run_ID):
+    return save_path + '/' + run_ID + '/log'
+
+
 def get_module_attr(module, name):
     if isinstance(module, nn.DataParallel):
         return getattr(module.module, name)
@@ -142,17 +195,20 @@ def get_module_attr(module, name):
     return getattr(module, name)
 
 
+def get_samples_path_from_run_ID(save_path, run_ID):
+    return save_path + '/' + run_ID + '/samples'
+
+
 def im_flip(array):
     return np.fliplr(np.flipud(np.transpose(array, (1, 0))))
 
 
-def init_identity_grid_2D(nx, ny):
+def init_identity_grid_2D(dims):
     """
     initialise a 2D identity grid
-
-    :param nx: number of voxels in the x direction
-    :param ny: number of voxels in the y direction
     """
+
+    nx, ny = dims[0], dims[1]
 
     x = torch.linspace(-1, 1, steps=nx)
     y = torch.linspace(-1, 1, steps=ny)
@@ -163,14 +219,12 @@ def init_identity_grid_2D(nx, ny):
     return torch.cat((x, y), 3)
 
 
-def init_identity_grid_3D(nx, ny, nz):
+def init_identity_grid_3D(dims):
     """
     initialise a 3D identity grid
-
-    :param nx: number of voxels in the x direction
-    :param ny: number of voxels in the y direction
-    :param nz: number of voxels in the z direction
     """
+
+    nx, ny, nz = dims[0], dims[1], dims[2]
 
     x = torch.linspace(-1, 1, steps=nx)
     y = torch.linspace(-1, 1, steps=ny)
@@ -223,7 +277,7 @@ def pixel_to_normalised_3D(px_idx_x, px_idx_y, px_idx_z, dim_x, dim_y, dim_z):
     return x, y, z
 
 
-def rescale_im(im, range_min=-1.0, range_max=1.0):
+def rescale_im(im, range_min=0.0, range_max=1.0):
     """
     rescale the intensity of image pixels/voxels to a given range
     """
@@ -240,11 +294,13 @@ def rescale_residuals(res, mask, data_loss):
     res_masked = torch.where(mask, res, torch.zeros_like(res))
     res_masked_flattened = res_masked.view(1, -1, 1)
 
-    scaled_res = res_masked_flattened * torch.exp(-data_loss.log_std)
+    log_std = data_loss.log_std
+    scaled_res = res_masked_flattened * torch.exp(-1.0 * log_std)
+
     scaled_res.requires_grad_(True)
     scaled_res.retain_grad()
 
-    loss_VD = -1.0 * torch.sum(data_loss.log_pdf_VD(scaled_res))
+    loss_VD = -1.0 * data_loss.log_pdf_VD(scaled_res).sum()
     loss_VD.backward()
 
     return torch.sum(scaled_res * scaled_res.grad, dim=-1).view(res.shape)
@@ -298,10 +354,8 @@ def separable_conv_3D(field, *args):
         kernel_x = args[0]
         kernel_y = args[1]
         kernel_z = args[2]
+        padding = args[3]
 
-        padding_sz = args[3]
-
-        padding = (padding_sz, padding_sz, padding_sz, padding_sz, padding_sz, padding_sz)
         field_out = F.pad(field_out, padding, mode='replicate')
 
         field_out = F.conv3d(field_out, kernel_z, groups=3)
@@ -317,11 +371,7 @@ def standardise_im(im):
     """
 
     im_mean, im_std = torch.mean(im), torch.std(im)
-
-    im -= im_mean
-    im /= im_std
-
-    return im
+    return (im - im_mean) / im_std
 
 
 def transform_coordinates(field):
@@ -330,9 +380,7 @@ def transform_coordinates(field):
     """
 
     field_out = field.clone()
-
-    no_dims = field.shape[1]
-    dims = field.shape[2:]
+    no_dims, dims = field.shape[1], field.shape[2:]
 
     for idx in range(no_dims):
         field_out[:, idx] = field_out[:, idx] * 2.0 / float(dims[idx] - 1)
@@ -346,9 +394,7 @@ def transform_coordinates_inv(field):
     """
 
     field_out = field.clone()
-
-    no_dims = field.shape[1]
-    dims = field.shape[2:]
+    no_dims, dims = field.shape[1], field.shape[2:]
 
     for idx in range(no_dims):
         field_out[:, idx] = field_out[:, idx] * float(dims[idx] - 1) / 2.0
@@ -356,7 +402,8 @@ def transform_coordinates_inv(field):
     return field_out
 
 
-def VD(residual, mask):
+@torch.no_grad()
+def calc_VD_factor(residual, mask):
     """
     virtual decimation
 
@@ -374,94 +421,27 @@ def VD(residual, mask):
     and took the expectation wrt q(z).
     """
 
-    with torch.no_grad():
-        # variance
-        residual_masked = residual[mask]
-        var_res = torch.mean(residual_masked ** 2)
+    # variance
+    residual_masked = residual[mask]
+    var_res = torch.mean(residual_masked ** 2)
 
-        # covariance..
-        no_unmasked_voxels = torch.sum(mask)
-        residual_masked = torch.where(mask, residual, torch.zeros_like(residual))
+    # covariance..
+    no_unmasked_voxels = mask.sum()
+    residual_masked = torch.where(mask, residual, torch.zeros_like(residual))
 
-        cov_x = torch.sum(residual_masked[:, :, :-1] * residual_masked[:, :, 1:]) / no_unmasked_voxels
-        cov_y = torch.sum(residual_masked[:, :, :, :-1] * residual_masked[:, :, :, 1:]) / no_unmasked_voxels
-        cov_z = torch.sum(residual_masked[:, :, :, :, :-1] * residual_masked[:, :, :, :, 1:]) / no_unmasked_voxels
+    cov_x = torch.sum(residual_masked[:, :, :-1] * residual_masked[:, :, 1:]) / no_unmasked_voxels
+    cov_y = torch.sum(residual_masked[:, :, :, :-1] * residual_masked[:, :, :, 1:]) / no_unmasked_voxels
+    cov_z = torch.sum(residual_masked[:, :, :, :, :-1] * residual_masked[:, :, :, :, 1:]) / no_unmasked_voxels
 
-        corr_x = cov_x / var_res
-        corr_y = cov_y / var_res
-        corr_z = cov_z / var_res
+    corr_x = cov_x / var_res
+    corr_y = cov_y / var_res
+    corr_z = cov_z / var_res
 
-        sq_VD_x = torch.clamp(-2.0 / math.pi * torch.log(corr_x), max=1.0)
-        sq_VD_y = torch.clamp(-2.0 / math.pi * torch.log(corr_y), max=1.0)
-        sq_VD_z = torch.clamp(-2.0 / math.pi * torch.log(corr_z), max=1.0)
+    sq_VD_x = torch.clamp(-2.0 / math.pi * torch.log(corr_x), max=1.0)
+    sq_VD_y = torch.clamp(-2.0 / math.pi * torch.log(corr_y), max=1.0)
+    sq_VD_z = torch.clamp(-2.0 / math.pi * torch.log(corr_z), max=1.0)
 
-        return torch.sqrt(sq_VD_x * sq_VD_y * sq_VD_z)
-
-
-def VD_reg(nabla_vx, nabla_vy, nabla_vz, mask):
-    with torch.no_grad():
-        mask_stacked = torch.cat((mask, mask, mask), dim=1)
-
-        # variance
-        nabla_vx_masked = nabla_vx[mask_stacked]
-        nabla_vy_masked = nabla_vy[mask_stacked]
-        nabla_vz_masked = nabla_vz[mask_stacked]
-
-        var_nabla_vx = torch.mean(nabla_vx_masked ** 2)
-        var_nabla_vy = torch.mean(nabla_vy_masked ** 2)
-        var_nabla_vz = torch.mean(nabla_vz_masked ** 2)
-
-        # covariance..
-        no_unmasked_voxels = torch.sum(mask_stacked)
-
-        nabla_vx_masked = torch.where(mask_stacked, nabla_vx, torch.zeros_like(nabla_vx))
-        nabla_vy_masked = torch.where(mask_stacked, nabla_vy, torch.zeros_like(nabla_vy))
-        nabla_vz_masked = torch.where(mask_stacked, nabla_vz, torch.zeros_like(nabla_vz))
-
-        cov_nabla_vx_x = torch.sum(nabla_vx_masked[:, :, :-1] * nabla_vx_masked[:, :, 1:]) / no_unmasked_voxels
-        cov_nabla_vx_y = torch.sum(nabla_vx_masked[:, :, :, :-1] * nabla_vx_masked[:, :, :, 1:]) / no_unmasked_voxels
-        cov_nabla_vx_z = \
-            torch.sum(nabla_vx_masked[:, :, :, :, :-1] * nabla_vx_masked[:, :, :, :, 1:]) / no_unmasked_voxels
-
-        cov_nabla_vy_x = torch.sum(nabla_vy_masked[:, :, :-1] * nabla_vy_masked[:, :, 1:]) / no_unmasked_voxels
-        cov_nabla_vy_y = torch.sum(nabla_vy_masked[:, :, :, :-1] * nabla_vy_masked[:, :, :, 1:]) / no_unmasked_voxels
-        cov_nabla_vy_z = \
-            torch.sum(nabla_vy_masked[:, :, :, :, :-1] * nabla_vy_masked[:, :, :, :, 1:]) / no_unmasked_voxels
-
-        cov_nabla_vz_x = torch.sum(nabla_vz_masked[:, :, :-1] * nabla_vz_masked[:, :, 1:]) / no_unmasked_voxels
-        cov_nabla_vz_y = torch.sum(nabla_vz_masked[:, :, :, :-1] * nabla_vz_masked[:, :, :, 1:]) / no_unmasked_voxels
-        cov_nabla_vz_z = \
-            torch.sum(nabla_vz_masked[:, :, :, :, :-1] * nabla_vz_masked[:, :, :, :, 1:]) / no_unmasked_voxels
-
-        corr_vx_x = cov_nabla_vx_x / var_nabla_vx
-        corr_vx_y = cov_nabla_vx_y / var_nabla_vx
-        corr_vx_z = cov_nabla_vx_z / var_nabla_vx
-
-        corr_vy_x = cov_nabla_vy_x / var_nabla_vy
-        corr_vy_y = cov_nabla_vy_y / var_nabla_vy
-        corr_vy_z = cov_nabla_vy_z / var_nabla_vy
-
-        corr_vz_x = cov_nabla_vz_x / var_nabla_vz
-        corr_vz_y = cov_nabla_vz_y / var_nabla_vz
-        corr_vz_z = cov_nabla_vz_z / var_nabla_vz
-
-        sq_VD_nabla_vx_x = torch.clamp(-2.0 / math.pi * torch.log(corr_vx_x), max=1.0)
-        sq_VD_nabla_vx_y = torch.clamp(-2.0 / math.pi * torch.log(corr_vx_y), max=1.0)
-        sq_VD_nabla_vx_z = torch.clamp(-2.0 / math.pi * torch.log(corr_vx_z), max=1.0)
-
-        sq_VD_nabla_vy_x = torch.clamp(-2.0 / math.pi * torch.log(corr_vy_x), max=1.0)
-        sq_VD_nabla_vy_y = torch.clamp(-2.0 / math.pi * torch.log(corr_vy_y), max=1.0)
-        sq_VD_nabla_vy_z = torch.clamp(-2.0 / math.pi * torch.log(corr_vy_z), max=1.0)
-
-        sq_VD_nabla_vz_x = torch.clamp(-2.0 / math.pi * torch.log(corr_vz_x), max=1.0)
-        sq_VD_nabla_vz_y = torch.clamp(-2.0 / math.pi * torch.log(corr_vz_y), max=1.0)
-        sq_VD_nabla_vz_z = torch.clamp(-2.0 / math.pi * torch.log(corr_vz_z), max=1.0)
-
-        VD_nabla_vx = torch.sqrt(sq_VD_nabla_vx_x * sq_VD_nabla_vx_y * sq_VD_nabla_vx_z)
-        VD_nabla_vy = torch.sqrt(sq_VD_nabla_vy_x * sq_VD_nabla_vy_y * sq_VD_nabla_vy_z)
-        VD_nabla_vz = torch.sqrt(sq_VD_nabla_vz_x * sq_VD_nabla_vz_y * sq_VD_nabla_vz_z)
-
-        return (VD_nabla_vx + VD_nabla_vy + VD_nabla_vz) / 3.0
+    return torch.sqrt(sq_VD_x * sq_VD_y * sq_VD_z)
 
 
 class MetricTracker:

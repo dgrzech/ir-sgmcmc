@@ -1,9 +1,8 @@
-import math
 from abc import ABC, abstractmethod
 
+import math
 import numpy as np
 import torch
-import torch.nn.functional as F
 from torch import nn
 from torch.nn.functional import log_softmax
 
@@ -36,82 +35,20 @@ class DataLoss(nn.Module, ABC):
         pass
 
 
-class LCC(DataLoss):
-    """
-    local cross-correlation
-    """
-
-    def __init__(self, s):
-        super(LCC, self).__init__()
-
-        self.s = s
-        self.padding = (s, s, s, s, s, s)
-
-        self.kernel_size = self.s * 2 + 1
-        self.sz = float(self.kernel_size ** 3)
-
-        self.kernel = nn.Conv3d(1, 1, kernel_size=self.kernel_size, stride=1, bias=False)
-        nn.init.ones_(self.kernel.weight)
-        self.kernel.weight.requires_grad_(False)
-
-    def forward(self, im_fixed, im_moving, mask):
-        cross = self.map(im_fixed, im_moving)
-        return self.reduce(cross, mask)
-
-    def map(self, im_fixed, im_moving):
-        im_fixed_padded = F.pad(im_fixed, self.padding, mode='replicate')
-        im_moving_padded = F.pad(im_moving, self.padding, mode='replicate')
-
-        u_F = self.kernel(im_fixed_padded) / self.sz
-        var_F = self.kernel(torch.pow(F.pad(im_fixed - u_F, self.padding, mode='replicate'), 2)) / self.sz
-        sigma_F = torch.sqrt(var_F)
-
-        u_M = self.kernel(im_moving_padded) / self.sz
-        var_M = self.kernel(torch.pow(F.pad(im_moving - u_M, self.padding, mode='replicate'), 2)) / self.sz
-        sigma_M = torch.sqrt(var_M)
-
-        n_F = (im_fixed - u_F) / (sigma_F + 1e-10)
-        n_M = (im_moving - u_M) / (sigma_M + 1e-10)
-
-        return self.kernel(F.pad(n_F * n_M, self.padding, mode='replicate'))
-
-    def reduce(self, z, mask):
-        return -1.0 * torch.sum(torch.pow(z, 2) * mask)
-
-
-class SSD(DataLoss):
-    """
-    sum of squared differences
-    """
-
-    def __init__(self):
-        super(SSD, self).__init__()
-
-    def forward(self, im_fixed, im_moving, mask):
-        z = self.map(im_fixed, im_moving)
-        return self.reduce(z, mask)
-
-    def map(self, im_fixed, im_moving):
-        return im_fixed - im_moving
-
-    def reduce(self, z, mask):
-        return 0.5 * torch.sum(torch.pow(z, 2) * mask)
-
-
-class GaussianMixtureLoss(DataLoss):
+class GMM(DataLoss):
     """
     Gaussian mixture loss
     """
 
-    def __init__(self, num_components, s):
-        super(GaussianMixtureLoss, self).__init__()
+    def __init__(self, no_components, s):
+        super(GMM, self).__init__()
 
-        # parameters of the Gaussian mixture
-        self.num_components = num_components
+        # parameters of the GMM
+        self.no_components = no_components
 
-        self.log_std = nn.Parameter(torch.Tensor(num_components))
-        self.logits = nn.Parameter(torch.zeros(num_components))
-        self.register_buffer('_log_sqrt_2pi', torch.log(torch.Tensor([math.pi * 2.0])) / 2.0)
+        self.logits = nn.Parameter(torch.zeros(no_components))
+        self.log_std = nn.Parameter(torch.zeros(no_components))
+        self.register_buffer('_log_sqrt_2pi', torch.tensor(0.5 * math.log(2.0 * math.pi)))
 
         # parameters of LCC
         self.s = s
@@ -120,67 +57,64 @@ class GaussianMixtureLoss(DataLoss):
         self.kernel_size = self.s * 2 + 1
         self.sz = float(self.kernel_size ** 3)
 
-        self.kernel = nn.Conv3d(1, 1, kernel_size=self.kernel_size, stride=1, bias=False)
+        self.kernel = nn.Conv3d(1, 1, kernel_size=self.kernel_size, stride=1, padding=s, bias=False, padding_mode='replicate')
+        nn.init.ones_(self.kernel.weight)
         self.kernel.weight.requires_grad_(False)
 
-        nn.init.ones_(self.kernel.weight)
-
+    @torch.no_grad()
     def init_parameters(self, sigma):
-        nn.init.zeros_(self.logits)
-
         sigma_min, sigma_max = sigma / 100.0, sigma * 5.0
-        log_std_init = torch.linspace(math.log(sigma_min), math.log(sigma_max), steps=self.num_components)
+        log_std_init = torch.linspace(math.log(sigma_min), math.log(sigma_max), steps=self.no_components)
+        self.log_std.weight = log_std_init
 
-        self.log_std.data.copy_(log_std_init.data)
+    @property
+    def log_proportions(self):
+        return log_softmax(self.logits + 1e-2, dim=0, _stacklevel=5)
+
+    @property
+    def log_scales(self):
+        return self.log_std
+
+    @property
+    def proportions(self):
+        return torch.exp(self.log_proportions)
+
+    @property
+    def scales(self):
+        return torch.exp(self.log_scales)
+
+    @property
+    def precision(self):
+        return torch.exp(-2.0 * self.log_std)
 
     def log_pdf(self, z):
         # could equally apply the retraction trick to the mean (Riemannian metric for the tangent space of mean is
         # (v|w)_{mu,Sigma} = v^t Sigma^{-1} w), but it is less important with adaptive optimizers
         # and I also like the behaviour of the standard gradient intuitively
 
-        z_flattened = z.view(1, -1, 1)
-
-        E = (z_flattened * torch.exp(-self.log_std)) ** 2 / 2.0
-        log_proportions = self.log_proportions()
-        log_Z = self.log_std + self._log_sqrt_2pi
-
-        return torch.logsumexp((log_proportions - log_Z) - E, dim=-1)
+        E = 0.5 * (z.view(1, -1, 1) * torch.exp(-1.0 * self.log_std)) ** 2
+        return torch.logsumexp((self.log_proportions - self.log_std - self._log_sqrt_2pi) - E, dim=-1)
 
     def log_pdf_VD(self, z_scaled):
-        E = (z_scaled ** 2) / 2.0
-        log_proportions = self.log_proportions()
-        log_Z = self.log_std + self._log_sqrt_2pi
-
-        return torch.logsumexp((log_proportions - log_Z) - E, dim=-1)
-
-    def log_proportions(self):
-        return log_softmax(self.logits + 1e-2, dim=0, _stacklevel=5)
-
-    def log_scales(self):
-        return self.log_std
-
-    def precision(self):
-        return torch.exp(-2 * self.log_std)
+        E = 0.5 * z_scaled ** 2
+        return torch.logsumexp((self.log_proportions - self.log_std - self._log_sqrt_2pi) - E, dim=-1)
 
     def forward(self, z):
         return self.reduce(z)
 
     def map(self, im_fixed, im_moving):
-        im_fixed_padded = F.pad(im_fixed, self.padding, mode='replicate')
-        im_moving_padded = F.pad(im_moving, self.padding, mode='replicate')
-
-        u_F = self.kernel(im_fixed_padded) / self.sz
-        var_F = self.kernel(torch.pow(F.pad(im_fixed - u_F, self.padding, mode='replicate'), 2)) / self.sz
+        u_F = self.kernel(im_fixed) / self.sz
+        var_F = self.kernel(torch.pow(im_fixed - u_F, 2)) / self.sz
         sigma_F = torch.sqrt(var_F + 1e-10)
 
-        u_M = self.kernel(im_moving_padded) / self.sz
-        var_M = self.kernel(torch.pow(F.pad(im_moving - u_M, self.padding, mode='replicate'), 2)) / self.sz
+        u_M = self.kernel(im_moving) / self.sz
+        var_M = self.kernel(torch.pow(im_moving - u_M, 2)) / self.sz
         sigma_M = torch.sqrt(var_M + 1e-10)
 
-        return (im_fixed - u_F) / sigma_F, (im_moving - u_M) / sigma_M
+        return (im_fixed - u_F) / sigma_F - (im_moving - u_M) / sigma_M
 
     def reduce(self, z):
-        return -1.0 * torch.sum(self.log_pdf(z))
+        return -1.0 * self.log_pdf(z).sum()
 
 
 """
@@ -196,8 +130,12 @@ class RegLoss(nn.Module, ABC):
     Or strings that can be parsed to a diff_op
     """
 
-    def __init__(self, diff_op=None):
+    def __init__(self, diff_op=None, dims=None, learnable=False):
         super(RegLoss, self).__init__()
+
+        self.dims = dims
+        self.dof = np.prod(dims) * 3.0
+        self.learnable = learnable
 
         if diff_op is not None:
             if isinstance(diff_op, str):
@@ -253,18 +191,14 @@ class RegLoss_L2(RegLoss):
         v = fft(half_kernel_hat * alpha * 1 / sqrt(|omega|**2 + 1)) is the (Sobolev-smooth) velocity field
     """
 
-    def __init__(self, dims, w_reg, diff_op=None, learnable=False):
-        super(RegLoss_L2, self).__init__(diff_op=diff_op)
+    def __init__(self, w_reg, diff_op=None, dims=None, learnable=False):
+        super(RegLoss_L2, self).__init__(diff_op=diff_op, dims=dims, learnable=learnable)
 
         log_w_reg = math.log(w_reg)
-        self.log_w_reg = nn.Parameter(torch.tensor([log_w_reg]), requires_grad=learnable)
+        self.log_w_reg = nn.Parameter(torch.tensor(log_w_reg), requires_grad=learnable)
 
-    def _loss(self, y, dof=0):
-        """
-        num degrees of freedom dof only matters for learnable w_reg, the argument doesn't need to be passed otherwise.
-        """
-
-        return self.log_w_reg.exp() * 0.5 * y - .5 * dof * self.log_w_reg, y.log()
+    def _loss(self, y):
+        return 0.5 * self.log_w_reg.exp() * y - 0.5 * self.dof * self.log_w_reg, y.log()
 
 
 class RegLoss_Student(RegLoss):
@@ -272,7 +206,7 @@ class RegLoss_Student(RegLoss):
     See RegLossL2 for tips.
     """
 
-    def __init__(self, dims, diff_op=None, nu0=2e-6, lambda0=1e-6, a0=1e-6, b0=1e-6):
+    def __init__(self, diff_op=None, dims=None, nu0=2e-6, lambda0=1e-6, a0=1e-6, b0=1e-6):
         """
          t_nu0(x | 0, lambda0) with  nu0 = 2 * a0 deg. of freedom and scale lambda0 = a0 / b0,
         following a canonical parameterisation of the multivariate student distribution t_nu(x | mu, Lambda)
@@ -288,7 +222,7 @@ class RegLoss_Student(RegLoss):
         lambda0 gives a more direct access to the strength of the prior       
         """
 
-        super(RegLoss_Student, self).__init__(diff_op=diff_op)
+        super(RegLoss_Student, self).__init__(diff_op=diff_op, dims=dims, learnable=False)
 
         if nu0 != 2e-6:
             self.a0 = nu0 / 2.0
@@ -300,14 +234,14 @@ class RegLoss_Student(RegLoss):
 
         self.b0_twice = b0 * 2.0
 
-    def _loss(self, y, dof):
+    def _loss(self, y):
         """
         num degrees of freedom dof is the number of free variables in the field to which this is a prior
         WARNING. dof = 3*number of voxels for a prior on a velocity field
             I changed your multiplicative factor from 1.5 to .5, but dof = 3*N
         """
 
-        return torch.log(self.b0_twice + y) * (self.a0 + .5 * dof), y.log()
+        return torch.log(self.b0_twice + y) * (self.a0 + 0.5 * self.dof), y.log()
 
 
 class RegLoss_EnergyBased(RegLoss):
@@ -320,8 +254,8 @@ class RegLoss_EnergyBased(RegLoss):
     up to the quality of numerical implementation in here.
     """
 
-    def __init__(self, dims, diff_op=None):
-        super(RegLoss_EnergyBased, self).__init__(diff_op=diff_op)
+    def __init__(self, diff_op=None, dims=None, learnable=False):
+        super(RegLoss_EnergyBased, self).__init__(diff_op=diff_op, dims=dims, learnable=learnable)
 
     @abstractmethod
     def _mlog_energy_prior(self, y, *args, **kwargs):
@@ -330,13 +264,13 @@ class RegLoss_EnergyBased(RegLoss):
         """
         pass
 
-    def _loss(self, y, dof, *args, **kwargs):
+    def _loss(self, y, *args, **kwargs):
         """
         All EnergyBasedRegLosses should use this _loss, not meant to be overriden.
         To adjust the behaviour, adjust the _mlog_energy_prior (and the class attributes)
         """
 
-        return self._mlog_energy_prior(y, *args, **kwargs) + (dof * 0.5 - 1.0) * torch.log(y), torch.log(y)
+        return self._mlog_energy_prior(y, *args, **kwargs) + (0.5 * self.dof - 1.0) * y.log(), y.log()
 
 
 class RegLoss_LogNormal(RegLoss_EnergyBased):
@@ -344,7 +278,7 @@ class RegLoss_LogNormal(RegLoss_EnergyBased):
     log-Normal prior on the energy y, as returned by self.forward.
     """
 
-    def __init__(self, dims, w_reg=1.0, diff_op=None, learnable=False, loc_learnable=False, scale_learnable=False):
+    def __init__(self, w_reg=1.0, diff_op=None, dims=None, learnable=False):
         """
         The default values have no reason to be good values. If no prior knowledge, use learnable=True along with:
         - A Normal hyperprior on loc, or another choice (see below)
@@ -364,36 +298,30 @@ class RegLoss_LogNormal(RegLoss_EnergyBased):
         regulates the amount of deviations of ln(y), the log of the actual energy from the mean loc.
         """
 
-        super(RegLoss_EnergyBased, self).__init__(diff_op=diff_op)
+        super(RegLoss_EnergyBased, self).__init__(diff_op=diff_op, dims=dims, learnable=learnable)
 
-        if not learnable:
-            loc_learnable = False
-            scale_learnable = False
+        log_energy_exp_gamma_prior = model_distr.LogEnergyExpGammaPrior(w_reg, self.dof)
+        loc_init = log_energy_exp_gamma_prior.expectation().clone().detach()
+        log_scale_init = math.log(4.0) + loc_init.log()
 
-        dof = np.prod(dims) * 3.0
-        log_energy_exp_gamma_prior = model_distr.LogEnergyExpGammaPrior(w_reg, dof)
+        self.loc = nn.Parameter(loc_init, requires_grad=learnable)
+        self.log_scale = nn.Parameter(log_scale_init, requires_grad=learnable)
 
-        loc_init = log_energy_exp_gamma_prior.expectation()
-        self.loc = nn.Parameter(torch.Tensor([loc_init]), requires_grad=loc_learnable)
-
-        log_scale = math.log(4.0) + math.log(loc_init)
-        self.log_scale = nn.Parameter(torch.Tensor([log_scale]), requires_grad=scale_learnable)
+    @property
+    def scale(self):
+        return self.log_scale.exp()
 
     def _mlog_energy_prior(self, y, *args, **kwargs):
-        scale = torch.exp(self.log_scale)
-        log_y = torch.log(y)
-
-        return log_y + self.log_scale + 0.5 * ((log_y - self.loc) / scale) ** 2
+        return y.log() + self.log_scale + 0.5 * ((y.log() - self.loc) / self.scale) ** 2
 
 
 class RegLoss_LogNormal_L2(RegLoss_EnergyBased):
-    def __init__(self, dims, diff_op=None):
-        super(RegLoss_EnergyBased, self).__init__(diff_op=diff_op)
-        self.gamma_distr = model_distr._GammaDistribution(np.prod(dims) * 1.5, 0.1, learnable=False)
+    def __init__(self, diff_op=None, dims=None):
+        super(RegLoss_EnergyBased, self).__init__(diff_op=diff_op, dims=dims, learnable=False)
+        self.gamma_distr = model_distr._GammaDistribution(0.5 * self.dof, 0.1, learnable=False)
 
     def _mlog_energy_prior(self, y, *args, **kwargs):
-        log_y = torch.log(y)
-        return -1.0 * self.gamma_distr(log_y)
+        return -1.0 * self.gamma_distr(y.log())
 
 
 """
@@ -424,23 +352,23 @@ class EntropyMultivariateNormal(Entropy):
 
     def forward(self, **kwargs):
         if len(kwargs) == 2:
-            log_var_v = kwargs['log_var_v']
-            sigma_v = torch.exp(0.5 * log_var_v)
-            u_v = kwargs['u_v']
+            log_var = kwargs['log_var']
+            u = kwargs['u']
 
-            return 0.5 * (torch.log1p(torch.sum(torch.pow(u_v / sigma_v, 2))) + torch.sum(log_var_v))
+            sigma = torch.exp(0.5 * log_var)
+            return 0.5 * (torch.log1p(torch.sum(torch.pow(u / sigma, 2), dim=(1, 2, 3, 4))) + torch.sum(log_var, dim=(1, 2, 3, 4)))
         elif len(kwargs) == 4:
-            v_sample = kwargs['v_sample']
+            sample = kwargs['sample']
 
-            mu_v = kwargs['mu_v']
-            log_var_v = kwargs['log_var_v']
-            sigma_v = torch.exp(0.5 * log_var_v)
-            u_v = kwargs['u_v']
+            mu = kwargs['mu']
+            log_var = kwargs['log_var']
+            u = kwargs['u']
 
-            v = (v_sample - mu_v) / sigma_v
-            u_n = u_v / sigma_v
+            sigma = torch.exp(0.5 * log_var)
 
-            t1 = torch.sum(torch.pow(v, 2))
-            t2 = torch.pow(torch.sum(v * u_n), 2) / (1.0 + torch.sum(torch.pow(u_n, 2)))
+            sample_n = (sample - mu) / sigma
+            u_n = u / sigma
 
+            t1 = torch.sum(torch.pow(sample_n, 2), dim=(1, 2, 3, 4))
+            t2 = torch.pow(torch.sum(sample_n * u_n, dim=(1, 2, 3, 4)), 2) / (1.0 + torch.sum(torch.pow(u_n, 2), dim=(1, 2, 3, 4)))
             return 0.5 * (t1 - t2)

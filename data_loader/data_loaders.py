@@ -2,14 +2,22 @@ from base import BaseDataLoader
 from .datasets import BiobankDataset
 
 
-class LearnSimDataLoader(BaseDataLoader):
-    def __init__(self, data_dir, dim_x, dim_y, dim_z, save_dirs=None):
-        self.data_dir = data_dir
-        self.save_dirs = save_dirs
-        self.dataset = BiobankDataset(data_dir, save_dirs, dim_x, dim_y, dim_z)
+class BiobankDataLoader(BaseDataLoader):
+    def __init__(self, dims, data_dir, save_dirs, sigma_v_init, u_v_init):
+        self.data_dir, self.save_dirs = data_dir, save_dirs
+        self.dataset = BiobankDataset(dims, data_dir, save_dirs, sigma_v_init, u_v_init)
 
         super().__init__(self.dataset)
 
     @property
-    def spacing(self):
-        return self.dataset.spacing
+    def dims(self):
+        return self.dataset.dims
+
+    @property
+    def fixed(self):
+        return self.dataset.fixed
+
+    @property
+    def im_spacing(self):
+        return self.dataset.im_spacing
+

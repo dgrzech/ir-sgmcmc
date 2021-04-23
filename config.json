@@ -1,17 +1,16 @@
 {
 	"name": "SG_MCMC",
-	"n_gpu": 1,
 	"data_loss": {
-		"type": "GaussianMixtureLoss",
+		"type": "GMM",
 		"args": {
-			"num_components": 4,
+			"no_components": 4,
 			"s": 3
 		}
 	},
 	"data_loss_scale_prior": {
 		"type": "LogScaleNormalPrior",
 		"args": {
-			"loc": 0.0,
+			"loc": 0.00,
 			"scale": 2.30
 		}
 	},
@@ -19,7 +18,7 @@
 		"type": "DirichletPrior",
 		"args": {
 			"num_classes": 4,
-			"alpha": 5e-1
+			"alpha": 0.5
 		}
 	},
 	"reg_loss": {
@@ -27,8 +26,6 @@
 		"args": {
 			"diff_op": "GradientOperator",
 			"learnable": true,
-			"loc_learnable": true,
-			"scale_learnable": true,
 			"w_reg": 0.75
 		}
 	},
@@ -36,22 +33,21 @@
 		"type": "LogEnergyExpGammaPrior",
 		"args": {
 			"w_reg": 0.75,
-			"dof": 2654208.0,
 			"learnable": false
 		}
 	},
 	"reg_loss_scale_prior": {
 		"type": "LogScaleNormalPrior",
 		"args": {
-			"loc": 2.7973,
-			"scale": 5.0
+			"loc": 2.80,
+			"scale": 5.00
 		}
 	},
 	"entropy_loss": {
 		"type": "EntropyMultivariateNormal",
 		"args": {}
 	},
-	"transformation_model": {
+	"transformation_module": {
 		"type": "SVF_3D",
 		"args": {}
 	},
@@ -59,10 +55,10 @@
 		"type": "RegistrationModule",
 		"args": {}
 	},
-	"optimizer_v": {
+	"optimizer_q_v": {
 		"type": "Adam",
 		"args": {
-			"lr": 5e-3
+			"lr": 0.005
 		}
 	},
 	"optimizer_SG_MCMC": {
@@ -72,18 +68,18 @@
 		}
 	},
 	"data_loader": {
-		"type": "LearnSimDataLoader",
+		"type": "BiobankDataLoader",
 		"args": {
-			"data_dir": "/vol/bitbucket/dig15/dataset/",
-			"dim_x": 96,
-			"dim_y": 96,
-			"dim_z": 96
+			"data_dir": "/vol/bitbucket/dig15/datasets/mine/biobank/biobank_01",
+			"dims": [96, 96, 96],
+			"sigma_v_init": 0.5,
+			"u_v_init": 0.0
 		}
 	},
 	"Sobolev_grad": {
 		"enabled": true,
 		"s": 7,
-		"lambda": 5e-1
+		"lambda": 0.5
 	},
 	"virtual_decimation": true,
 	"trainer": {
@@ -94,11 +90,11 @@
 			"magnitude": 0.1
 		},
 		"no_iters_VI": 1536,
-		"no_samples_VI_test": 50,
-		"no_iters_burn_in": 10000,
-		"no_samples_MCMC": 100000,
-		"log_period_VI": 512,
-		"log_period_MCMC": 1800,
+		"no_samples_VI_test": 200,
+		"no_iters_burn_in": 50000,
+		"no_samples_MCMC": 200000,
+		"log_period_VI": 128,
+		"log_period_MCMC": 400,
 		"tensorboard": true,
 		"verbosity": 2,
 		"save_dir": "saved/"
