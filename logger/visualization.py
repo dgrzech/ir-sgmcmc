@@ -60,7 +60,7 @@ histogram of residuals
 """
 
 
-def log_hist_res(writer, im_pair_idxs, residuals_batch, data_loss):
+def log_hist_res(writer, im_pair_idxs, residuals_batch, data_loss, model=''):
     device = residuals_batch.device
     residuals_batch = residuals_batch.view(1, -1).cpu().numpy()
 
@@ -84,7 +84,7 @@ def log_hist_res(writer, im_pair_idxs, residuals_batch, data_loss):
         x = x.detach().squeeze().cpu().numpy()
 
         sns.lineplot(x=x, y=model_fit, color='green', ax=ax)
-        writer.add_figure('hist_residuals/' + str(im_pair_idx), fig)
+        writer.add_figure('hist_residuals/' + model + '/' + str(im_pair_idx), fig)
 
 
 """
@@ -255,7 +255,7 @@ def sample_grid(im_moving_warped_slices, v_norm_slices, displacement_norm_slices
 
 def log_sample(writer, im_pair_idxs, data_loss, res_batch, im_moving_warped_batch, v_batch, displacement_batch,
                log_det_J_batch):
-    log_hist_res(writer, im_pair_idxs, res_batch, data_loss)
+    log_hist_res(writer, im_pair_idxs, res_batch, data_loss, model='MCMC')
 
     im_moving_warped_batch = im_moving_warped_batch.cpu().numpy()
     v_norm_batch = calc_norm(v_batch).cpu().numpy()

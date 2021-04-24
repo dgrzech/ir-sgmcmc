@@ -210,7 +210,7 @@ class Trainer(BaseTrainer):
                     # visualisation in tensorboard
                     var_params_q_v_smoothed = self.__get_var_params_smoothed(var_params_q_v)
 
-                    log_hist_res(self.writer, im_pair_idxs, output['res'], data_loss)
+                    log_hist_res(self.writer, im_pair_idxs, output['res'], data_loss, model='VI')
                     log_images(self.writer, im_pair_idxs, self.fixed['im'], moving['im'], output['im_moving_warped'])
                     log_fields(self.writer, im_pair_idxs, var_params_q_v_smoothed, output['displacement'], output['log_det_J'])
 
@@ -279,9 +279,6 @@ class Trainer(BaseTrainer):
             v_curr_state = SGLD.apply(self.v_curr_state, self.SGLD_params['sigma'], self.SGLD_params['tau'])
             v_curr_state_smoothed = SobolevGrad.apply(v_curr_state, self.S, self.padding)
             transformation, displacement = self.transformation_module(v_curr_state_smoothed)
-
-            with torch.no_grad():
-                no_non_diffeomorphic_voxels, log_det_J = calc_no_non_diffeomorphic_voxels(transformation, self.diff_op)
 
             # data
             if self.add_noise_uniform:
@@ -352,11 +349,13 @@ class Trainer(BaseTrainer):
 
                 # other
                 self.metrics.update('MCMC/reg/energy', log_y.exp().item())
-                self.metrics.update('MCMC/no_non_diffeomorphic_voxels', no_non_diffeomorphic_voxels.item())
 
                 if sample_no > self.no_iters_burn_in:
                     if sample_no % self.log_period_MCMC == 0 or sample_no == self.no_samples_MCMC:
                         self.writer.set_step(sample_no - self.no_iters_burn_in)
+
+                        no_non_diffeomorphic_voxels, log_det_J = calc_no_non_diffeomorphic_voxels(transformation, self.diff_op)
+                        self.metrics.update('MCMC/no_non_diffeomorphic_voxels', no_non_diffeomorphic_voxels.item())
 
                         # metrics
                         seg_moving_warped = self.registration_module(moving['seg'], transformation)
@@ -373,10 +372,9 @@ class Trainer(BaseTrainer):
                         # .nii.gz/.vtk
                         save_sample(im_pair_idxs, self.save_dirs, self.im_spacing, sample_no, im_moving_warped, displacement, log_det_J, model='MCMC')
 
-            if no_non_diffeomorphic_voxels > 0.001 * np.prod(self.data_loader.dims):
-                self.logger.info("sample " + str(sample_no) + ", detected " + str(no_non_diffeomorphic_voxels) +
-                                 " voxels where the sample transformation is not diffeomorphic; exiting..")
-                exit()
+                        if no_non_diffeomorphic_voxels > 0.001 * np.prod(self.data_loader.dims):
+                            self.logger.info("sample " + str(sample_no) + ", detected " + str(no_non_diffeomorphic_voxels) + " voxels where the sample transformation is not diffeomorphic; exiting..")
+                            exit()
 
     def _run_model(self):
         for batch_idx, (im_pair_idxs, moving, var_params_q_v) in enumerate(self.data_loader):
@@ -445,7 +443,7 @@ class Trainer(BaseTrainer):
         data_loss.init_parameters(res_std)
         alpha = self.__get_VD_factor(res, data_loss)
 
-        for step in range(1, 11):
+        for step in range(1, 51):
             self._step_GMM(res_masked, alpha)
 
     @torch.no_grad()
@@ -457,7 +455,7 @@ class Trainer(BaseTrainer):
         res = self.losses['data']['loss'].map(self.fixed['im'], moving['im'])
         res_masked = res[self.fixed['mask']]
 
-        log_hist_res(self.writer, im_pair_idxs, res_masked, self.losses['data']['loss'])
+        log_hist_res(self.writer, im_pair_idxs, res_masked, self.losses['data']['loss'], model='VI')
         log_images(self.writer, im_pair_idxs, self.fixed['im'], moving['im'], moving['im'])
 
         # metrics

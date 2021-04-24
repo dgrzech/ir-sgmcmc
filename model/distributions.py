@@ -179,13 +179,13 @@ Useful hyperpriors
 
 class DirichletPrior(nn.Module):
     """
-    alpha: None, scalar or (num_classes,) tensor expected. The concentration parameters for the prior.
+    alpha: None, scalar or (no_classes, ) tensor expected. The concentration parameters for the prior.
     
     Wrapping torch distribution is even worse than copy paste -_-
     PS remove constants if you want
     """
 
-    def __init__(self, num_classes, alpha=None):
+    def __init__(self, no_classes, alpha=None):
         super(DirichletPrior, self).__init__()
 
         if alpha is None:
@@ -199,10 +199,10 @@ class DirichletPrior(nn.Module):
             is_float = False
 
         if is_float:
-            self.concentration = nn.Parameter(torch.full(size=[num_classes], fill_value=alpha), requires_grad=False)
+            self.concentration = nn.Parameter(torch.full(size=[no_classes], fill_value=alpha), requires_grad=False)
         else:
-            if len(alpha) != num_classes:
-                raise ValueError("Invalid tensor size. Expected {}".format(num_classes) +
+            if len(alpha) != no_classes:
+                raise ValueError("Invalid tensor size. Expected {}".format(no_classes) +
                                  ", got: {}".format(len(alpha)))
             self.concentration = nn.Parameter(alpha.clone().squeeze().detach(), requires_grad=False)
 

@@ -65,7 +65,7 @@ class GMM(DataLoss):
     def init_parameters(self, sigma):
         sigma_min, sigma_max = sigma / 100.0, sigma * 5.0
         log_std_init = torch.linspace(math.log(sigma_min), math.log(sigma_max), steps=self.no_components)
-        self.log_std.weight = log_std_init
+        self.log_std.data.copy_(log_std_init.data)
 
     @property
     def log_proportions(self):

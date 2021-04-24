@@ -104,20 +104,24 @@ class ConfigParser:
         data_loss_scale_prior = self.init_obj('data_loss_scale_prior', model_distr)
         data_loss_proportion_prior = self.init_obj('data_loss_proportion_prior', model_distr)
 
-        self['reg_loss']['args']['dims'] = self['data_loader']['args']['dims']
-        self['reg_loss_loc_prior']['args']['dof'] = np.prod(self['data_loader']['args']['dims']) * 3.0
-
-        reg_loss = self.init_obj('reg_loss', model_loss)
-        reg_loss_loc_prior = self.init_obj('reg_loss_loc_prior', model_distr)
-        reg_loss_scale_prior = self.init_obj('reg_loss_scale_prior', model_distr)
-
         entropy_loss = self.init_obj('entropy_loss', model_loss)
 
-        return {'data':
-                    {'loss': data_loss, 'scale_prior': data_loss_scale_prior, 'proportion_prior': data_loss_proportion_prior},
-                'reg':
-                    {'loss': reg_loss, 'loc_prior': reg_loss_loc_prior, 'scale_prior': reg_loss_scale_prior},
-                'entropy': entropy_loss}
+        self['reg_loss']['args']['dims'] = self['data_loader']['args']['dims']
+        reg_loss = self.init_obj('reg_loss', model_loss)
+
+        losses_dict = {'data':
+                           {'loss': data_loss, 'scale_prior': data_loss_scale_prior, 'proportion_prior': data_loss_proportion_prior},
+                       'reg': {'loss': reg_loss}, 'entropy': entropy_loss}
+
+        if reg_loss.__class__.__name__ == 'RegLoss_LogNormal':
+            self['reg_loss_loc_prior']['args']['dof'] = np.prod(self['data_loader']['args']['dims']) * 3.0
+            reg_loss_loc_prior = self.init_obj('reg_loss_loc_prior', model_distr)
+            reg_loss_scale_prior = self.init_obj('reg_loss_scale_prior', model_distr)
+
+            losses_dict['reg']['loc_prior'] = reg_loss_loc_prior
+            losses_dict['reg']['scale_prior'] = reg_loss_scale_prior
+
+        return losses_dict
 
     def init_metrics(self):
         cfg_data_loss = self['data_loss']['args']
