@@ -485,15 +485,24 @@ class Trainer(BaseTrainer):
 
     @torch.no_grad()
     def __SGLD_init(self, var_params_q_v):
-        v_curr_state = sample_q_v(var_params_q_v, no_samples=1).detach()
+        if self.MCMC_init == 'VI':
+            v_curr_state = sample_q_v(var_params_q_v, no_samples=1).detach()
+
+            log_var_v = var_params_q_v['log_var'].detach().clone()
+            sigma = torch.exp(0.5 * log_var_v)
+        elif self.MCMC_init in ['identity', 'noise']:
+            if self.MCMC_init == 'identity':
+                v_curr_state = torch.zeros_like(var_params_q_v['mu']).detach()
+            elif self.MCMC_init == 'noise':
+                v_curr_state = torch.randn_like(var_params_q_v['mu']).detach()
+
+            sigma = torch.ones_like(v_curr_state)
+
         v_curr_state.requires_grad_(True)
+        sigma.requires_grad_(False)
 
         cfg_sg_mcmc = self.config['optimizer_SG_MCMC']['args']
         tau = cfg_sg_mcmc['lr']
-
-        log_var_v = var_params_q_v['log_var'].detach().clone()
-        sigma = torch.exp(0.5 * log_var_v)
-        sigma.requires_grad_(False)
 
         self.SGLD_params = {'sigma': sigma, 'tau': tau}
         self.v_curr_state = v_curr_state
