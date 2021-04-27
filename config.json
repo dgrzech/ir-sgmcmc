@@ -10,14 +10,14 @@
 	"data_loss_scale_prior": {
 		"type": "LogScaleNormalPrior",
 		"args": {
-			"loc": 0.00,
-			"scale": 2.30
+			"loc": 0.0,
+			"scale": 2.3
 		}
 	},
 	"data_loss_proportion_prior": {
 		"type": "DirichletPrior",
 		"args": {
-			"num_classes": 4,
+			"no_classes": 4,
 			"alpha": 0.5
 		}
 	},
@@ -25,22 +25,22 @@
 		"type": "RegLoss_LogNormal",
 		"args": {
 			"diff_op": "GradientOperator",
-			"learnable": true,
-			"w_reg": 0.75
+			"w_reg": 1.2,
+			"learnable": true
 		}
 	},
 	"reg_loss_loc_prior": {
 		"type": "LogEnergyExpGammaPrior",
 		"args": {
-			"w_reg": 0.75,
+			"w_reg": 1.2,
 			"learnable": false
 		}
 	},
 	"reg_loss_scale_prior": {
 		"type": "LogScaleNormalPrior",
 		"args": {
-			"loc": 2.80,
-			"scale": 5.00
+			"loc": 2.8,
+			"scale": 5.0
 		}
 	},
 	"entropy_loss": {
@@ -64,14 +64,14 @@
 	"optimizer_SG_MCMC": {
 		"type": "SGD",
 		"args": {
-			"lr": 0.25
+			"lr": 0.4
 		}
 	},
 	"data_loader": {
 		"type": "BiobankDataLoader",
 		"args": {
 			"data_dir": "/vol/bitbucket/dig15/datasets/mine/biobank/biobank_01",
-			"dims": [96, 96, 96],
+			"dims": [128, 128, 128],
 			"sigma_v_init": 0.5,
 			"u_v_init": 0.0
 		}
@@ -90,7 +90,7 @@
 			"magnitude": 0.1
 		},
 		"no_iters_VI": 1536,
-		"no_samples_VI_test": 200,
+		"no_samples_VI_test": 100,
 		"no_iters_burn_in": 50000,
 		"no_samples_MCMC": 200000,
 		"log_period_VI": 128,

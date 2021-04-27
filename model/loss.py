@@ -316,9 +316,9 @@ class RegLoss_LogNormal(RegLoss_EnergyBased):
 
 
 class RegLoss_LogNormal_L2(RegLoss_EnergyBased):
-    def __init__(self, diff_op=None, dims=None):
+    def __init__(self, w_reg, diff_op=None, dims=None):
         super(RegLoss_EnergyBased, self).__init__(diff_op=diff_op, dims=dims, learnable=False)
-        self.gamma_distr = model_distr._GammaDistribution(0.5 * self.dof, 0.1, learnable=False)
+        self.gamma_distr = model_distr._GammaDistribution(0.5 * self.dof, 0.5 * w_reg, learnable=False)
 
     def _mlog_energy_prior(self, y, *args, **kwargs):
         return -1.0 * self.gamma_distr(y.log())
