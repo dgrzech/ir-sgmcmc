@@ -41,12 +41,16 @@ def save_field_to_disk(field, file_path, spacing=(1, 1, 1)):
     :param spacing: voxel spacing
     """
 
-    spacing = spacing.numpy()
+    try:
+        spacing = spacing.numpy()
+    except:
+        pass
+
     field_x, field_y, field_z = field[0], field[1], field[2]
 
     vectors = np.empty(field_x.shape + (3,), dtype=float)
     vectors[..., 0], vectors[..., 1], vectors[..., 2] = field_x, field_y, field_z
-    vectors = vectors.transpose(2, 1, 0, 3).copy()
+    vectors = vectors.transpose(2, 1, 0, 3).copy()  # NOTE (DG): reorder the vectors per VTK requirement of x first, y next and z last
     vectors.shape = vectors.size // 3, 3
 
     im_vtk = tvtk.ImageData(spacing=spacing, origin=(0, 0, 0), dimensions=field_x.shape)
@@ -101,6 +105,24 @@ def save_im_to_disk(im, file_path, spacing=(1, 1, 1)):
 """
 (vector) fields
 """
+
+
+def save_displacement_mean_and_std_dev(logger, im_pair_idx, save_dirs, spacing, displacement_mean, displacement_std_dev, model):
+    folder = save_dirs['samples']
+    mean_path = path.join(folder, model + '_sample_mean_' + str(im_pair_idx) + '.vtk')
+    std_dev_path = path.join(folder, model + '_sample_std_dev_' + str(im_pair_idx) + '.vtk')
+
+    displacement_mean = displacement_mean * spacing[0]
+    logger.info(f'{model} displacement mean min.: {displacement_mean.min().item():.2f}, displacement mean max.: {displacement_mean.max().item():.2f}')
+
+    displacement_mean = displacement_mean.cpu().numpy()
+    save_field_to_disk(displacement_mean, mean_path, spacing)
+
+    displacement_std_dev = displacement_std_dev * spacing[0]
+    logger.info(f'{model} displacement std. dev. min.: {displacement_std_dev.min().item():.2f}, displacement std. dev. max.: {displacement_std_dev.max().item():.2f}')
+
+    displacement_std_dev = displacement_std_dev.cpu().numpy()
+    save_field_to_disk(displacement_std_dev, std_dev_path, spacing)
 
 
 def save_field(im_pair_idx, save_dirs, spacing, field, field_name, model=None):

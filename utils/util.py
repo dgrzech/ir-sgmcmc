@@ -1,6 +1,8 @@
 import json
 from collections import OrderedDict
 from itertools import repeat
+from os import listdir
+from os.path import isfile, join
 from pathlib import Path
 
 import SimpleITK as sitk
@@ -10,6 +12,8 @@ import pandas as pd
 import torch
 import torch.nn.functional as F
 from torch import nn
+from vtk import vtkStructuredPointsReader
+from vtk.util.numpy_support import vtk_to_numpy
 
 
 def ensure_dir(dirname):
@@ -78,6 +82,52 @@ def calc_det_J(nabla):
     return det_J
 
 
+def load_field(file_path, dims):
+    reader = vtkStructuredPointsReader()
+    reader.ReadAllVectorsOn()
+    reader.ReadAllScalarsOn()
+
+    reader.SetFileName(file_path)
+    reader.Update()
+
+    data = reader.GetOutput()
+    vectors = data.GetPointData().GetArray('field')
+    vectors = vtk_to_numpy(vectors).reshape(1, *dims[2:], 3).transpose(0, 3, 2, 1, 4)
+
+    field = torch.zeros(dims)
+    field[:, 0] = torch.from_numpy(vectors[..., 0])
+    field[:, 1] = torch.from_numpy(vectors[..., 1])
+    field[:, 2] = torch.from_numpy(vectors[..., 2])
+
+    return field
+
+
+@torch.no_grad()
+def calc_displacement_std_dev(logger, save_dirs, displacement_mean, model):
+    dims = displacement_mean.shape
+    device = displacement_mean.device
+
+    sample_var = torch.zeros_like(displacement_mean)
+
+    reader = vtkStructuredPointsReader()
+    reader.ReadAllVectorsOn()
+    reader.ReadAllScalarsOn()
+
+    samples_path = save_dirs['samples'] / model
+    samples_filenames = [join(samples_path, f) for f in listdir(samples_path) if isfile(join(samples_path, f)) and '.vtk' in f]
+    no_samples = len(samples_filenames)
+    logger.info(f'no. samples: {no_samples}')
+
+    for idx, sample_filename in enumerate(samples_filenames):
+        field = load_field(sample_filename, dims).to(device)
+        sample_var += (displacement_mean - field) ** 2
+
+    sample_var /= no_samples
+    sample_standard_dev = torch.sqrt(sample_var)
+
+    return sample_standard_dev
+
+
 @torch.no_grad()
 def calc_DSC_GPU(im_pair_idxs, seg_fixed, seg_moving, structures_dict):
     """
@@ -98,7 +148,11 @@ def calc_DSC_GPU(im_pair_idxs, seg_fixed, seg_moving, structures_dict):
             numerator = 2.0 * ((seg_fixed_im_pair == label) * (seg_moving_im_pair == label)).sum().item()
             denominator = (seg_fixed_im_pair == label).sum().item() + (seg_moving_im_pair == label).sum().item()
 
-            score = numerator / denominator
+            try:
+                score = numerator / denominator
+            except:
+                score = 0.0
+
             DSC[structure] = score
 
         DSC_batch[im_pair] = DSC

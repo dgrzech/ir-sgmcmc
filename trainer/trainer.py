@@ -4,10 +4,11 @@ import numpy as np
 import torch
 
 from base import BaseTrainer
-from logger import log_fields, log_hist_res, log_images, log_sample, save_fixed_im, save_fixed_mask, save_moving_im, \
-    save_sample
+from logger import log_fields, log_hist_res, log_images, log_sample, save_displacement_mean_and_std_dev, \
+    save_fixed_im, save_fixed_mask, save_moving_im, save_sample
 from optimizers import Adam
-from utils import SGLD, SobolevGrad, Sobolev_kernel_1D, add_noise_uniform_field, calc_VD_factor, calc_metrics, \
+from utils import SGLD, SobolevGrad, Sobolev_kernel_1D, add_noise_uniform_field, calc_VD_factor, \
+    calc_displacement_std_dev, calc_metrics, \
     calc_no_non_diffeomorphic_voxels, max_field_update, rescale_residuals, sample_q_v
 
 
@@ -228,6 +229,11 @@ class Trainer(BaseTrainer):
             v_sample_smoothed = SobolevGrad.apply(v_sample, self.S, self.padding)
             transformation, displacement = self.transformation_module(v_sample_smoothed)
 
+            try:
+                displacement_mean += displacement
+            except:
+                displacement_mean = displacement.detach().clone()
+
             no_non_diffeomorphic_voxels, log_det_J = calc_no_non_diffeomorphic_voxels(transformation, self.diff_op)
             self.metrics.update('VI/test/no_non_diffeomorphic_voxels', no_non_diffeomorphic_voxels)
 
@@ -242,6 +248,15 @@ class Trainer(BaseTrainer):
                 self.metrics.update('VI/test/DSC/' + structure, DSC_val.item())
 
             save_sample(im_pair_idxs, self.save_dirs, self.im_spacing, test_sample_no, im_moving_warped, displacement, log_det_J, model='VI')
+
+        displacement_mean /= self.no_samples_VI_test
+        displacement_mean *= self.fixed['mask']
+
+        self.logger.info('\ncalculating sample standard deviation of the displacement..')
+        displacement_std_dev = calc_displacement_std_dev(self.logger, self.save_dirs, displacement_mean, 'VI')
+        displacement_std_dev *= self.fixed['mask']
+
+        save_displacement_mean_and_std_dev(self.logger, im_pair_idxs[0], self.save_dirs, self.im_spacing, displacement_mean[0], displacement_std_dev[0], 'VI')
 
         """
         speed
@@ -304,7 +319,7 @@ class Trainer(BaseTrainer):
 
         loss_terms = {'data': data_term, 'reg': reg_term, 'total_loss': loss}
         output = {'v_curr_state_smoothed': v_curr_state_smoothed, 'transformation': transformation, 'displacement': displacement,
-                  'im_moving_warped': im_moving_warped,}
+                  'im_moving_warped': im_moving_warped}
         aux = {'alpha': alpha, 'reg_energy': log_y.exp(), 'res': res_masked}
 
         return loss_terms, output, aux
@@ -359,6 +374,13 @@ class Trainer(BaseTrainer):
                     if sample_no % self.log_period_MCMC == 0 or sample_no == self.no_samples_MCMC:
                         self.writer.set_step(sample_no - self.no_iters_burn_in)
 
+                        displacement = output['displacement']
+
+                        try:
+                            displacement_mean += displacement
+                        except:
+                            displacement_mean = displacement.detach().clone()
+
                         transformation = output['transformation']
                         no_non_diffeomorphic_voxels, log_det_J = calc_no_non_diffeomorphic_voxels(transformation, self.diff_op)
                         self.metrics.update('MCMC/no_non_diffeomorphic_voxels', no_non_diffeomorphic_voxels.item())
@@ -374,7 +396,6 @@ class Trainer(BaseTrainer):
 
                         v_curr_state_smoothed = output['v_curr_state_smoothed']
                         im_moving_warped = output['im_moving_warped']
-                        displacement = output['displacement']
                         res_masked = aux['res']
 
                         # tensorboard
@@ -386,6 +407,17 @@ class Trainer(BaseTrainer):
                         if no_non_diffeomorphic_voxels > 0.001 * np.prod(self.data_loader.dims):
                             self.logger.info('sample ' + str(sample_no) + ', detected ' + str(no_non_diffeomorphic_voxels) + ' voxels where the sample transformation is not diffeomorphic; exiting..')
                             exit()
+
+        with torch.no_grad():
+            no_samples = self.no_samples_MCMC / self.log_period_MCMC
+            displacement_mean /= no_samples
+            displacement_mean *= self.fixed['mask']
+
+            self.logger.info('\ncalculating sample standard deviation of the displacement..')
+            displacement_std_dev = calc_displacement_std_dev(self.logger, self.save_dirs, displacement_mean, 'MCMC')
+            displacement_std_dev *= self.fixed['mask']
+
+            save_displacement_mean_and_std_dev(self.logger, im_pair_idxs[0], self.save_dirs, self.im_spacing, displacement_mean[0], displacement_std_dev[0], 'MCMC')
 
         """
         speed
