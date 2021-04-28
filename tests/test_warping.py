@@ -11,25 +11,6 @@ class WarpingTestMethods(unittest.TestCase):
     def setUp(self):
         print(self._testMethodName + '\n')
 
-    def test_identity_transformation(self):
-        im_fixed = torch.rand(1, 1, *dims, device=device)
-        im_moving = torch.rand_like(im_fixed)
-        mask = torch.ones_like(im_fixed).bool()
-
-        transformation = identity_grid.permute([0, 4, 1, 2, 3])
-        im_moving_warped = registration_module(im_moving, transformation)
-
-        z_unwarped = (im_fixed - im_moving) ** 2
-        z_unwarped_masked = z_unwarped[mask]
-
-        z_warped = (im_fixed - im_moving_warped) ** 2
-        z_warped_masked = z_warped[mask]
-
-        unwarped_loss_value = loss_SSD(z_unwarped_masked).item()
-        warped_loss_value = loss_SSD(z_warped_masked).item()
-
-        assert pytest.approx(unwarped_loss_value, rel=rtol) == warped_loss_value
-
     def test_sphere_translation(self):
         # initialise 3D image of a sphere
         im_moving = -1.0 + torch.zeros(1, 1, *dims, device=device)

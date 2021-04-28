@@ -1,5 +1,6 @@
+from logger import save_field_to_disk
 from utils import SVF_2D, SVF_3D, calc_norm, pixel_to_normalised_2D, pixel_to_normalised_3D, plot_2D, plot_3D, \
-    separable_conv_3D
+    separable_conv_3D, load_field
 from .test_setup import *
 
 
@@ -121,3 +122,11 @@ class UtilsTestMethods(unittest.TestCase):
         assert torch.allclose(v_out[1, 0], torch.zeros_like(v_out[1, 0]), atol=atol)
         assert torch.allclose(v_out[1, 1], torch.zeros_like(v_out[1, 1]), atol=atol)
         assert torch.allclose(v_out[1, 2], 27.0 * torch.ones_like(v_out[1, 2]), atol=atol)
+
+    def test_save_and_load_vector_field(self):
+        field = torch.randn(*dims_v_small)
+        field_path = './temp/test_output/field.vtk'
+        save_field_to_disk(field[0], field_path)
+
+        field_new = load_field(field_path, dims_v_small)
+        assert torch.allclose(field, field_new)
