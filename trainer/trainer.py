@@ -103,9 +103,10 @@ class Trainer(BaseTrainer):
         entropy_term = entropy_loss(sample=v_sample_unsmoothed, mu=var_params_q_v['mu'], log_var=var_params_q_v['log_var'], u=var_params_q_v['u']).sum()
 
         loss_terms = {'data': data_term, 'reg': reg_term, 'entropy': entropy_term}
-        output = {'im_moving_warped': im_moving_warped, 'res': res_masked,
+        output = {'im_moving_warped': im_moving_warped,
                   'transformation': transformation, 'log_det_J': log_det_J, 'displacement': displacement}
-        aux = {'alpha': alpha, 'reg_energy': log_y.exp(), 'no_non_diffeomorphic_voxels': no_non_diffeomorphic_voxels}
+        aux = {'alpha': alpha, 'reg_energy': log_y.exp(), 'no_non_diffeomorphic_voxels': no_non_diffeomorphic_voxels,
+               'res': res_masked}
 
         if reg_loss.learnable:
             reg_term_loc_prior = self.losses['reg']['loc_prior'](log_y).sum() if reg_loss.learnable else 0.0
@@ -210,7 +211,7 @@ class Trainer(BaseTrainer):
                     # visualisation in tensorboard
                     var_params_q_v_smoothed = self.__get_var_params_smoothed(var_params_q_v)
 
-                    log_hist_res(self.writer, im_pair_idxs, output['res'], data_loss, model='VI')
+                    log_hist_res(self.writer, im_pair_idxs, aux['res'], data_loss, model='VI')
                     log_images(self.writer, im_pair_idxs, self.fixed['im'], moving['im'], output['im_moving_warped'])
                     log_fields(self.writer, im_pair_idxs, var_params_q_v_smoothed, output['displacement'], output['log_det_J'])
 
@@ -257,16 +258,62 @@ class Trainer(BaseTrainer):
             seg_moving_warped = self.registration_module(moving['seg'], transformation)
 
         stop = datetime.now()
-
         VI_sampling_speed = (self.no_samples_VI_test * 10 + 1) / (stop - start).total_seconds()
         self.logger.info(f'VI sampling speed: {VI_sampling_speed:.2f} samples/sec')
+
+    def _SGLD_transition(self, moving, data_loss, reg_loss):
+        v_curr_state = SGLD.apply(self.v_curr_state, self.SGLD_params['sigma'], self.SGLD_params['tau'])
+        v_curr_state_smoothed = SobolevGrad.apply(v_curr_state, self.S, self.padding)
+        transformation, displacement = self.transformation_module(v_curr_state_smoothed)
+
+        # data
+        if self.add_noise_uniform:
+            transformation_with_uniform_noise = add_noise_uniform_field(transformation, self.alpha)
+            im_moving_warped = self.registration_module(moving['im'], transformation_with_uniform_noise)
+        else:
+            im_moving_warped = self.registration_module(moving['im'], transformation)
+
+        res = data_loss.map(self.fixed['im'], im_moving_warped)
+        alpha = self.__get_VD_factor(res, data_loss)
+        res_masked = res[self.fixed['mask']]
+
+        self._step_GMM(res_masked, alpha)
+
+        data_term = data_loss(res_masked).sum() * alpha
+        data_term -= self.losses['data']['scale_prior'](data_loss.log_scales).sum()
+        data_term -= self.losses['data']['proportion_prior'](data_loss.log_proportions).sum()
+
+        # regularisation
+        reg_term, log_y = reg_loss(v_curr_state_smoothed)
+        reg_term = reg_term.sum()
+
+        if reg_loss.learnable:
+            reg_term -= self.losses['reg']['loc_prior'](log_y).sum()
+            reg_term -= self.losses['reg']['scale_prior'](reg_loss.log_scale).sum()
+
+        # total loss
+        loss = data_term + reg_term
+
+        self.optimizer_SG_MCMC.zero_grad()
+        self.optimizer_reg.zero_grad()
+
+        loss.backward()  # backprop
+
+        self.optimizer_SG_MCMC.step()
+        self.optimizer_reg.step()
+
+        loss_terms = {'data': data_term, 'reg': reg_term, 'total_loss': loss}
+        output = {'v_curr_state_smoothed': v_curr_state_smoothed, 'transformation': transformation, 'displacement': displacement,
+                  'im_moving_warped': im_moving_warped,}
+        aux = {'alpha': alpha, 'reg_energy': log_y.exp(), 'res': res_masked}
+
+        return loss_terms, output, aux
 
     def _run_MCMC(self, im_pair_idxs, moving, var_params_q_v):
         self.__SGLD_init(var_params_q_v)
         data_loss, reg_loss = self.losses['data']['loss'], self.losses['reg']['loss']
 
-        self.logger.info('\nBURNING IN THE MARKOV CHAIN\n')
-        start = datetime.now()
+        self.logger.info('\nBURNING IN THE MARKOV CHAIN')
 
         for sample_no in range(1, self.no_iters_burn_in + self.no_samples_MCMC + 1):
             if sample_no < self.no_iters_burn_in and sample_no % self.log_period_MCMC == 0:
@@ -276,52 +323,10 @@ class Trainer(BaseTrainer):
             stochastic gradient Langevin dynamics
             """
 
-            v_curr_state = SGLD.apply(self.v_curr_state, self.SGLD_params['sigma'], self.SGLD_params['tau'])
-            v_curr_state_smoothed = SobolevGrad.apply(v_curr_state, self.S, self.padding)
-            transformation, displacement = self.transformation_module(v_curr_state_smoothed)
-
-            # data
-            if self.add_noise_uniform:
-                transformation_with_uniform_noise = add_noise_uniform_field(transformation, self.alpha)
-                im_moving_warped = self.registration_module(moving['im'], transformation_with_uniform_noise)
-            else:
-                im_moving_warped = self.registration_module(moving['im'], transformation)
-
-            res = data_loss.map(self.fixed['im'], im_moving_warped)
-            alpha = self.__get_VD_factor(res, data_loss)
-            res_masked = res[self.fixed['mask']]
-
-            self._step_GMM(res_masked, alpha)
-
-            data_term = data_loss(res_masked).sum() * alpha
-            data_term -= self.losses['data']['scale_prior'](data_loss.log_scales).sum()
-            data_term -= self.losses['data']['proportion_prior'](data_loss.log_proportions).sum()
-
-            # regularisation
-            reg_term, log_y = reg_loss(v_curr_state_smoothed)
-            reg_term = reg_term.sum()
-
-            if reg_loss.learnable:
-                reg_term -= self.losses['reg']['loc_prior'](log_y).sum()
-                reg_term -= self.losses['reg']['scale_prior'](reg_loss.log_scale).sum()
-
-            # total loss
-            loss = data_term + reg_term
-
-            self.optimizer_SG_MCMC.zero_grad()
-            self.optimizer_reg.zero_grad()
-
-            loss.backward()  # backprop
-
-            self.optimizer_SG_MCMC.step()
-            self.optimizer_reg.step()
+            loss_terms, output, aux = self._SGLD_transition(moving, data_loss, reg_loss)
 
             if sample_no == self.no_iters_burn_in:
-                self.logger.info('\nENDED BURNING IN')
-                stop = datetime.now()
-
-                MCMC_sampling_speed = self.no_iters_burn_in / (stop - start).total_seconds()
-                self.logger.info(f'SG-MCMC sampling speed: {MCMC_sampling_speed:.2f} samples/sec\n')
+                self.logger.info('ENDED BURNING IN')
 
             """
             outputs
@@ -340,20 +345,21 @@ class Trainer(BaseTrainer):
                     self.metrics.update('MCMC/reg/scale', reg_loss.scale.item())
 
                 if self.virutal_decimation:
-                    self.metrics.update('MCMC/VD/alpha', alpha.item())
+                    self.metrics.update('MCMC/VD/alpha', aux['alpha'].item())
 
                 # losses
-                self.metrics.update('MCMC/data_term', data_term.item())
-                self.metrics.update('MCMC/reg_term', reg_term.item())
-                self.metrics.update('MCMC/total_loss', loss.item())
+                self.metrics.update('MCMC/data_term', loss_terms['data'].item())
+                self.metrics.update('MCMC/reg_term', loss_terms['reg'].item())
+                self.metrics.update('MCMC/total_loss', loss_terms['total_loss'].item())
 
                 # other
-                self.metrics.update('MCMC/reg/energy', log_y.exp().item())
+                self.metrics.update('MCMC/reg/energy', aux['reg_energy'].item())
 
                 if sample_no > self.no_iters_burn_in:
                     if sample_no % self.log_period_MCMC == 0 or sample_no == self.no_samples_MCMC:
                         self.writer.set_step(sample_no - self.no_iters_burn_in)
 
+                        transformation = output['transformation']
                         no_non_diffeomorphic_voxels, log_det_J = calc_no_non_diffeomorphic_voxels(transformation, self.diff_op)
                         self.metrics.update('MCMC/no_non_diffeomorphic_voxels', no_non_diffeomorphic_voxels.item())
 
@@ -366,6 +372,11 @@ class Trainer(BaseTrainer):
                             self.metrics.update('MCMC/ASD/' + structure, ASD_val.item())
                             self.metrics.update('MCMC/DSC/' + structure, DSC_val.item())
 
+                        v_curr_state_smoothed = output['v_curr_state_smoothed']
+                        im_moving_warped = output['im_moving_warped']
+                        displacement = output['displacement']
+                        res_masked = aux['res']
+
                         # tensorboard
                         log_sample(self.writer, im_pair_idxs, data_loss, res_masked, im_moving_warped, v_curr_state_smoothed, displacement, log_det_J)
 
@@ -373,8 +384,24 @@ class Trainer(BaseTrainer):
                         save_sample(im_pair_idxs, self.save_dirs, self.im_spacing, sample_no, im_moving_warped, displacement, log_det_J, model='MCMC')
 
                         if no_non_diffeomorphic_voxels > 0.001 * np.prod(self.data_loader.dims):
-                            self.logger.info("sample " + str(sample_no) + ", detected " + str(no_non_diffeomorphic_voxels) + " voxels where the sample transformation is not diffeomorphic; exiting..")
+                            self.logger.info('sample ' + str(sample_no) + ', detected ' + str(no_non_diffeomorphic_voxels) + ' voxels where the sample transformation is not diffeomorphic; exiting..')
                             exit()
+
+        """
+        speed
+        """
+
+        no_samples_MCMC_speed_test = 100
+        start = datetime.now()
+
+        for sample_no in range(1, no_samples_MCMC_speed_test + 1):
+            _, output, _ = self._SGLD_transition(moving, data_loss, reg_loss)
+            transformation = output['transformation']
+            seg_moving_warped = self.registration_module(moving['seg'], transformation)
+
+        stop = datetime.now()
+        MCMC_sampling_speed = no_samples_MCMC_speed_test / (stop - start).total_seconds()
+        self.logger.info(f'\nMCMC sampling speed: {MCMC_sampling_speed:.2f} samples/sec')
 
     def _run_model(self):
         for batch_idx, (im_pair_idxs, moving, var_params_q_v) in enumerate(self.data_loader):
