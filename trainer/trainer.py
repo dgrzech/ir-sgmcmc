@@ -250,13 +250,11 @@ class Trainer(BaseTrainer):
             save_sample(im_pair_idxs, self.save_dirs, self.im_spacing, test_sample_no, im_moving_warped, displacement, log_det_J, model='VI')
 
         displacement_mean /= self.no_samples_VI_test
-        displacement_mean *= self.fixed['mask']
 
         self.logger.info('\ncalculating sample standard deviation of the displacement..')
         displacement_std_dev = calc_displacement_std_dev(self.logger, self.save_dirs, displacement_mean, 'VI')
-        displacement_std_dev *= self.fixed['mask']
 
-        save_displacement_mean_and_std_dev(self.logger, im_pair_idxs[0], self.save_dirs, self.im_spacing, displacement_mean[0], displacement_std_dev[0], 'VI')
+        save_displacement_mean_and_std_dev(self.logger, im_pair_idxs[0], self.save_dirs, self.im_spacing, displacement_mean[0], displacement_std_dev[0], self.fixed['mask'][0], 'VI')
 
         """
         speed
@@ -274,7 +272,7 @@ class Trainer(BaseTrainer):
 
         stop = datetime.now()
         VI_sampling_speed = (self.no_samples_VI_test * 10 + 1) / (stop - start).total_seconds()
-        self.logger.info(f'VI sampling speed: {VI_sampling_speed:.2f} samples/sec')
+        self.logger.info(f'\nVI sampling speed: {VI_sampling_speed:.2f} samples/sec')
 
     def _SGLD_transition(self, moving, data_loss, reg_loss):
         v_curr_state = SGLD.apply(self.v_curr_state, self.SGLD_params['sigma'], self.SGLD_params['tau'])
@@ -411,13 +409,11 @@ class Trainer(BaseTrainer):
         with torch.no_grad():
             no_samples = self.no_samples_MCMC / self.log_period_MCMC
             displacement_mean /= no_samples
-            displacement_mean *= self.fixed['mask']
 
             self.logger.info('\ncalculating sample standard deviation of the displacement..')
             displacement_std_dev = calc_displacement_std_dev(self.logger, self.save_dirs, displacement_mean, 'MCMC')
-            displacement_std_dev *= self.fixed['mask']
 
-            save_displacement_mean_and_std_dev(self.logger, im_pair_idxs[0], self.save_dirs, self.im_spacing, displacement_mean[0], displacement_std_dev[0], 'MCMC')
+            save_displacement_mean_and_std_dev(self.logger, im_pair_idxs[0], self.save_dirs, self.im_spacing, displacement_mean[0], displacement_std_dev[0], self.fixed['mask'][0], 'MCMC')
 
         """
         speed
