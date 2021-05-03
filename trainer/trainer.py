@@ -6,7 +6,6 @@ import torch
 from base import BaseTrainer
 from logger import log_fields, log_hist_res, log_images, log_sample, save_displacement_mean_and_std_dev, \
     save_fixed_im, save_fixed_mask, save_moving_im, save_sample
-from optimizers import Adam
 from utils import SGLD, SobolevGrad, Sobolev_kernel_1D, add_noise_uniform_field, calc_VD_factor, \
     calc_displacement_std_dev, calc_metrics, \
     calc_no_non_diffeomorphic_voxels, max_field_update, rescale_residuals, sample_q_v
@@ -48,11 +47,7 @@ class Trainer(BaseTrainer):
         self.optimizer_q_v = self.config.init_obj('optimizer_q_v', torch.optim, trainable_params_q_v)
 
     def __init_optimizer_GMM(self):
-        data_loss = self.losses['data']['loss']
-
-        self.optimizer_GMM = Adam(
-                [{'params': [data_loss.log_std], 'lr': 1e-1}, {'params': [data_loss.logits], 'lr': 1e-2}],
-                lr=1e-2, betas=(0.9, 0.95), lr_decay=1e-3)
+        self.optimizer_GMM = self.config.init_optimizer_GMM(self.losses['data']['loss'])
 
     def __init_optimizer_SG_MCMC(self):
         self.optimizer_SG_MCMC = self.config.init_obj('optimizer_SG_MCMC', torch.optim, [self.v_curr_state])
@@ -61,7 +56,7 @@ class Trainer(BaseTrainer):
         reg_loss = self.losses['reg']['loss']
 
         if reg_loss.learnable:
-            self.optimizer_reg = Adam([{'params': [reg_loss.loc, reg_loss.log_scale]}], lr=1e-1, betas=(0.9, 0.95))
+            self.optimizer_reg = self.config.init_obj('optimizer_reg', torch.optim, reg_loss.parameters())
 
     def _init_optimizers(self):
         self.optimizer_q_v, self.optimizer_SG_MCMC = None, None
@@ -110,8 +105,12 @@ class Trainer(BaseTrainer):
                'res': res_masked}
 
         if reg_loss.learnable:
-            reg_term_loc_prior = self.losses['reg']['loc_prior'](log_y).sum() if reg_loss.learnable else 0.0
-            loss_terms['reg_loc_prior'] = reg_term_loc_prior
+            if reg_loss.__class__.__name__ == 'RegLoss_LogNormal':
+                reg_term_loc_prior = self.losses['reg']['loc_prior'](log_y).sum()
+                loss_terms['reg_loc_prior'] = reg_term_loc_prior
+            elif reg_loss.__class__.__name__ == 'RegLoss_L2':
+                reg_term_w_reg_prior = self.losses['reg']['w_reg_prior'](reg_loss.log_w_reg)
+                loss_terms['w_reg_prior'] = reg_term_w_reg_prior
 
         return loss_terms, output, aux
 
@@ -144,8 +143,11 @@ class Trainer(BaseTrainer):
             reg_term = (loss_terms1['reg'] + loss_terms2['reg']) / 2.0
 
             if reg_loss.learnable:
-                reg_term -= (loss_terms1['reg_loc_prior'] + loss_terms2['reg_loc_prior']) / 2.0
-                reg_term -= self.losses['reg']['scale_prior'](reg_loss.log_scale).sum()
+                if reg_loss.__class__.__name__ == 'RegLoss_LogNormal':
+                    reg_term -= (loss_terms1['reg_loc_prior'] + loss_terms2['reg_loc_prior']) / 2.0
+                    reg_term -= self.losses['reg']['scale_prior'](reg_loss.log_scale).sum()
+                elif reg_loss.__class__.__name__ == 'RegLoss_L2':
+                    reg_term -= (loss_terms1['w_reg_prior'] + loss_terms2['w_reg_prior']) / 2.0
 
             # entropy
             entropy_term = (loss_terms1['entropy'] + loss_terms2['entropy']) / 2.0
@@ -179,8 +181,11 @@ class Trainer(BaseTrainer):
                     self.metrics.update('VI/train/GMM/proportion_' + str(idx), data_loss.proportions[idx].item())
 
                 if reg_loss.learnable:
-                    self.metrics.update('VI/train/reg/loc', reg_loss.loc.item())
-                    self.metrics.update('VI/train/reg/scale', reg_loss.scale.item())
+                    if reg_loss.__class__.__name__ == 'RegLoss_LogNormal':
+                        self.metrics.update('VI/train/reg/loc', reg_loss.loc.item())
+                        self.metrics.update('VI/train/reg/scale', reg_loss.scale.item())
+                    elif reg_loss.__class__.__name__ == 'RegLoss_L2':
+                        self.metrics.update('VI/train/reg/w_reg', reg_loss.log_w_reg.exp().item())
 
                 if self.virutal_decimation:
                     self.metrics.update('VI/train/VD/alpha', aux['alpha'].item())
@@ -301,19 +306,26 @@ class Trainer(BaseTrainer):
         reg_term = reg_term.sum()
 
         if reg_loss.learnable:
-            reg_term -= self.losses['reg']['loc_prior'](log_y).sum()
-            reg_term -= self.losses['reg']['scale_prior'](reg_loss.log_scale).sum()
+            if reg_loss.__class__.__name__ == 'RegLoss_LogNormal':
+                reg_term -= self.losses['reg']['loc_prior'](log_y).sum()
+                reg_term -= self.losses['reg']['scale_prior'](reg_loss.log_scale).sum()
+            elif reg_loss.__class__.__name__ == 'RegLoss_L2':
+                reg_term -= self.losses['reg']['w_reg_prior'](reg_loss.log_w_reg)
 
         # total loss
         loss = data_term + reg_term
 
         self.optimizer_SG_MCMC.zero_grad()
-        self.optimizer_reg.zero_grad()
+
+        if reg_loss.learnable:
+            self.optimizer_reg.zero_grad()
 
         loss.backward()  # backprop
 
         self.optimizer_SG_MCMC.step()
-        self.optimizer_reg.step()
+
+        if reg_loss.learnable:
+            self.optimizer_reg.step()
 
         loss_terms = {'data': data_term, 'reg': reg_term, 'total_loss': loss}
         output = {'v_curr_state_smoothed': v_curr_state_smoothed, 'transformation': transformation, 'displacement': displacement,
@@ -354,8 +366,11 @@ class Trainer(BaseTrainer):
                     self.metrics.update('MCMC/GMM/proportion_' + str(idx), data_loss.proportions[idx].item())
 
                 if reg_loss.learnable:
-                    self.metrics.update('MCMC/reg/loc', reg_loss.loc.item())
-                    self.metrics.update('MCMC/reg/scale', reg_loss.scale.item())
+                    if reg_loss.__class__.__name__ == 'RegLoss_LogNormal':
+                        self.metrics.update('MCMC/reg/loc', reg_loss.loc.item())
+                        self.metrics.update('MCMC/reg/scale', reg_loss.scale.item())
+                    elif reg_loss.__class__.__name__ == 'RegLoss_L2':
+                        self.metrics.update('MCMC/reg/w_reg', reg_loss.log_w_reg.exp().item())
 
                 if self.virutal_decimation:
                     self.metrics.update('MCMC/VD/alpha', aux['alpha'].item())

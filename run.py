@@ -7,16 +7,6 @@ import torch
 from parse_config import ConfigParser
 from trainer import Trainer
 
-# fix random seeds for reproducibility
-SEED = 123
-
-np.random.seed(SEED)
-torch.manual_seed(SEED)
-
-torch.autograd.set_detect_anomaly(True)
-torch.backends.cudnn.deterministic = True
-torch.backends.cudnn.benchmark = False
-
 
 def run(config):
     # data loader

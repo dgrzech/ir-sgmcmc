@@ -12,6 +12,7 @@ import model.loss as model_loss
 import utils.registration as registration
 import utils.transformation as transformation
 from logger import setup_logging
+from optimizers import Adam
 from utils import read_json, write_json
 
 
@@ -100,47 +101,76 @@ class ConfigParser:
         return self.init_obj('data_loader', module_data)
 
     def init_losses(self):
+        # data
         data_loss = self.init_obj('data_loss', model_loss)
         data_loss_scale_prior = self.init_obj('data_loss_scale_prior', model_distr)
         data_loss_proportion_prior = self.init_obj('data_loss_proportion_prior', model_distr)
 
+        # entropy
         entropy_loss = self.init_obj('entropy_loss', model_loss)
 
+        # regularisation
         self['reg_loss']['args']['dims'] = self['data_loader']['args']['dims']
         reg_loss = self.init_obj('reg_loss', model_loss)
 
-        losses_dict = {'data':
-                           {'loss': data_loss, 'scale_prior': data_loss_scale_prior, 'proportion_prior': data_loss_proportion_prior},
+        losses_dict = {'data': {'loss': data_loss, 'scale_prior': data_loss_scale_prior, 'proportion_prior': data_loss_proportion_prior},
                        'reg': {'loss': reg_loss}, 'entropy': entropy_loss}
+        
+        # regularisation priors
+        if reg_loss.learnable:
+            dof = np.prod(self['data_loader']['args']['dims']) * 3.0
 
-        if reg_loss.__class__.__name__ == 'RegLoss_LogNormal':
-            self['reg_loss_loc_prior']['args']['dof'] = np.prod(self['data_loader']['args']['dims']) * 3.0
-            reg_loss_loc_prior = self.init_obj('reg_loss_loc_prior', model_distr)
-            reg_loss_scale_prior = self.init_obj('reg_loss_scale_prior', model_distr)
+            if reg_loss.__class__.__name__ == 'RegLoss_LogNormal':
+                self['reg_loss_loc_prior']['args']['dof'] = dof
 
-            losses_dict['reg']['loc_prior'] = reg_loss_loc_prior
-            losses_dict['reg']['scale_prior'] = reg_loss_scale_prior
+                reg_loss_loc_prior = self.init_obj('reg_loss_loc_prior', model_distr)
+                losses_dict['reg']['loc_prior'] = reg_loss_loc_prior
+
+                reg_loss_scale_prior = self.init_obj('reg_loss_scale_prior', model_distr)
+                losses_dict['reg']['scale_prior'] = reg_loss_scale_prior
+            elif reg_loss.__class__.__name__ == 'RegLoss_L2':
+                shape = 0.5 * dof
+                rate = 1.0 / shape  # NOTE (DG): cf. Simpson, 2012
+
+                self['reg_loss_w_reg_prior']['args']['shape'] = shape
+                self['reg_loss_w_reg_prior']['args']['rate'] = rate
+
+                reg_loss_w_reg_prior = self.init_obj('reg_loss_w_reg_prior', model_distr)
+                losses_dict['reg']['w_reg_prior'] = reg_loss_w_reg_prior
 
         return losses_dict
 
     def init_metrics(self):
+        # model parameters
+        model_params = list()
+
         cfg_data_loss = self['data_loss']['args']
         no_components = cfg_data_loss['no_components']
+        
+        # model parameters: GMM
+        GMM_scales_VI = ['VI/train/GMM/scale_' + str(idx) for idx in range(no_components)]
+        GMM_scales_MCMC = ['MCMC/GMM/scale_' + str(idx) for idx in range(no_components)]
 
-        # model parameters
-        scales_VI = ['VI/train/GMM/scale_' + str(idx) for idx in range(no_components)] + ['VI/train/reg/scale']
-        scales_MCMC = ['MCMC/GMM/scale_' + str(idx) for idx in range(no_components)] + ['MCMC/reg/scale']
+        GMM_proportions_VI = ['VI/train/GMM/proportion_' + str(idx) for idx in range(no_components)]
+        GMM_proportions_MCMC = ['MCMC/GMM/proportion_' + str(idx) for idx in range(no_components)]
 
-        proportions_VI = ['VI/train/GMM/proportion_' + str(idx) for idx in range(no_components)]
-        proportions_MCMC = ['MCMC/GMM/proportion_' + str(idx) for idx in range(no_components)]
+        GMM_params = GMM_scales_VI + GMM_scales_MCMC + GMM_proportions_VI + GMM_proportions_MCMC
+        model_params.extend(GMM_params)
+        
+        # model parameters: regularisation
+        if self['reg_loss']['type'] == 'RegLoss_LogNormal':
+            reg_loc = ['VI/train/reg/loc', 'MCMC/reg/loc'] 
+            reg_scale = ['VI/train/reg/scale', 'MCMC/reg/scale']
 
-        locs_VI = ['VI/train/reg/loc']
-        locs_MCMC = ['MCMC/reg/loc']
+            reg_params = reg_loc + reg_scale
+            model_params.extend(reg_params)
+        elif self['reg_loss']['type'] == 'RegLoss_L2':
+            reg_params = ['VI/train/reg/w_reg', 'MCMC/reg/w_reg']
+            model_params.extend(reg_params)
 
-        VD_VI = ['VI/train/VD/alpha']
-        VD_MCMC = ['MCMC/VD/alpha']
-
-        model_params = locs_VI + locs_MCMC + scales_VI + scales_MCMC + proportions_VI + proportions_MCMC + VD_VI + VD_MCMC
+        # virtual decimation
+        VD = ['VI/train/VD/alpha', 'MCMC/VD/alpha']
+        model_params.extend(VD)
 
         # losses
         loss_terms_VI = ['VI/train/data_term', 'VI/train/reg_term', 'VI/train/entropy_term', 'VI/train/total_loss']
@@ -163,9 +193,7 @@ class ConfigParser:
         no_non_diffeomorphic_voxels_VI = ['VI/' + mode + '/no_non_diffeomorphic_voxels' for mode in modes]
         no_non_diffeomorphic_voxels_MCMC = ['MCMC/no_non_diffeomorphic_voxels']
 
-        metrics = ASD_VI + ASD_MCMC + DSC_VI + DSC_MCMC + \
-                  no_non_diffeomorphic_voxels_VI + no_non_diffeomorphic_voxels_MCMC
-
+        metrics = ASD_VI + ASD_MCMC + DSC_VI + DSC_MCMC + no_non_diffeomorphic_voxels_VI + no_non_diffeomorphic_voxels_MCMC
         return model_params + losses + metrics + other
 
     def init_transformation_and_registration_modules(self):
@@ -173,6 +201,18 @@ class ConfigParser:
 
         return self.init_obj('transformation_module', transformation), \
                self.init_obj('registration_module', registration)
+
+    def init_optimizer_GMM(self, data_loss):
+        if self['optimizer_GMM']['type'] != 'Adam':
+            print('only the Adam optimiser is supported for the GMM, exiting..')
+            exit()
+
+        cfg_optimizer_GMM = self['optimizer_GMM']['args']
+        optimizer_GMM = Adam([{'params': [data_loss.log_std], 'lr': cfg_optimizer_GMM['lr_log_std']},
+                              {'params': [data_loss.logits], 'lr': cfg_optimizer_GMM['lr_logits']}],
+                             lr=cfg_optimizer_GMM['lr_logits'], betas=cfg_optimizer_GMM['betas'], lr_decay=cfg_optimizer_GMM['lr_decay'])
+
+        return optimizer_GMM
 
     def init_obj(self, name, module, *args, **kwargs):
         """
