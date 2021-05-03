@@ -61,6 +61,22 @@
 			"lr": 0.005
 		}
 	},
+	"optimizer_GMM": {
+		"type": "Adam",
+		"args": {
+			"lr_log_std": 0.1,
+			"lr_logits": 0.01,
+			"betas": [0.9, 0.95],
+			"lr_decay": 0.001
+		}
+	},
+	"optimizer_reg": {
+		"type": "Adam",
+		"args": {
+			"lr": 0.1,
+			"betas": [0.9, 0.95]
+		}
+	},
 	"optimizer_SG_MCMC": {
 		"type": "SGD",
 		"args": {
