@@ -97,7 +97,7 @@
 			"magnitude": 0.1
 		},
 		"no_iters_VI": 1536,
-		"no_samples_VI_test": 500,
+		"no_samples_VI_test": 100,
 		"no_iters_burn_in": 100000,
 		"no_samples_MCMC": 1000000,
 		"log_period_VI": 128,
