@@ -103,25 +103,21 @@ def load_field(file_path, dims):
 
 
 @torch.no_grad()
-def calc_displacement_std_dev(logger, save_dirs, displacement_mean, model):
-    dims = displacement_mean.shape
-    device = displacement_mean.device
-
-    sample_var = torch.zeros_like(displacement_mean)
-
+def calc_displacement_std_dev(logger, save_dirs, displacement_mean_mm, model):
     samples_path = save_dirs['samples'] / model
     samples_filenames = [join(samples_path, f) for f in listdir(samples_path) if isfile(join(samples_path, f)) and '.vtk' in f]
     no_samples = len(samples_filenames)
     logger.info(f'no. samples: {no_samples}')
+    
+    dims = displacement_mean_mm.shape
+    device = displacement_mean_mm.device
+    sample_var_mm = torch.zeros_like(displacement_mean_mm)
 
     for idx, sample_filename in enumerate(samples_filenames):
-        field = load_field(sample_filename, dims).to(device)
-        sample_var += (displacement_mean - field) ** 2
+        field_mm = load_field(sample_filename, dims).to(device)
+        sample_var_mm += (field_mm - displacement_mean_mm) ** 2
 
-    sample_var /= no_samples
-    sample_standard_dev = torch.sqrt(sample_var)
-
-    return sample_standard_dev
+    return torch.sqrt(sample_var_mm / no_samples)
 
 
 @torch.no_grad()

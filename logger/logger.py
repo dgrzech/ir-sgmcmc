@@ -115,7 +115,6 @@ def save_displacement_mean_and_std_dev(logger, im_pair_idx, save_dirs, spacing, 
     mean_masked_path = path.join(folder, model + '_sample_mean_masked_' + str(im_pair_idx) + '.vtk')
     std_dev_masked_path = path.join(folder, model + '_sample_std_dev_masked_' + str(im_pair_idx) + '.vtk')
 
-    displacement_mean = displacement_mean * spacing[0]
     logger.info(f'{model} displacement mean min.: {displacement_mean.min().item():.2f}, displacement mean max.: {displacement_mean.max().item():.2f}')
 
     save_field_to_disk(displacement_mean.cpu().numpy(), mean_path, spacing)
@@ -123,7 +122,6 @@ def save_displacement_mean_and_std_dev(logger, im_pair_idx, save_dirs, spacing, 
     displacement_mean_masked = displacement_mean * mask
     save_field_to_disk(displacement_mean_masked.cpu().numpy(), mean_masked_path, spacing)
 
-    displacement_std_dev = displacement_std_dev * spacing[0]
     logger.info(f'{model} displacement std. dev. min.: {displacement_std_dev.min().item():.2f}, displacement std. dev. max.: {displacement_std_dev.max().item():.2f}')
 
     save_field_to_disk(displacement_std_dev.cpu().numpy(), std_dev_path, spacing)

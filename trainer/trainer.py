@@ -235,7 +235,7 @@ class Trainer(BaseTrainer):
             transformation, displacement = self.transformation_module(v_sample_smoothed)
 
             try:
-                displacement_mean += displacement
+                displacement_mean += displacement.detach().clone()
             except:
                 displacement_mean = displacement.detach().clone()
 
@@ -254,12 +254,10 @@ class Trainer(BaseTrainer):
 
             save_sample(im_pair_idxs, self.save_dirs, self.im_spacing, test_sample_no, im_moving_warped, displacement, log_det_J, model='VI')
 
-        displacement_mean /= self.no_samples_VI_test
-
         self.logger.info('\ncalculating sample standard deviation of the displacement..')
-        displacement_std_dev = calc_displacement_std_dev(self.logger, self.save_dirs, displacement_mean, 'VI')
-
-        save_displacement_mean_and_std_dev(self.logger, im_pair_idxs[0], self.save_dirs, self.im_spacing, displacement_mean[0], displacement_std_dev[0], self.fixed['mask'][0], 'VI')
+        displacement_mean_mm = displacement_mean * self.im_spacing[0] / self.no_samples_VI_test
+        displacement_std_dev_mm = calc_displacement_std_dev(self.logger, self.save_dirs, displacement_mean_mm, 'VI')
+        save_displacement_mean_and_std_dev(self.logger, im_pair_idxs[0], self.save_dirs, self.im_spacing, displacement_mean_mm[0], displacement_std_dev_mm[0], self.fixed['mask'][0], 'VI')
 
         """
         speed
@@ -422,13 +420,12 @@ class Trainer(BaseTrainer):
                             exit()
 
         with torch.no_grad():
-            no_samples = self.no_samples_MCMC / self.log_period_MCMC
-            displacement_mean /= no_samples
-
             self.logger.info('\ncalculating sample standard deviation of the displacement..')
-            displacement_std_dev = calc_displacement_std_dev(self.logger, self.save_dirs, displacement_mean, 'MCMC')
+            no_samples = self.no_samples_MCMC / self.log_period_MCMC
 
-            save_displacement_mean_and_std_dev(self.logger, im_pair_idxs[0], self.save_dirs, self.im_spacing, displacement_mean[0], displacement_std_dev[0], self.fixed['mask'][0], 'MCMC')
+            displacement_mean_mm = displacement_mean * self.im_spacing[0] / no_samples
+            displacement_std_dev_mm = calc_displacement_std_dev(self.logger, self.save_dirs, displacement_mean_mm, 'MCMC')
+            save_displacement_mean_and_std_dev(self.logger, im_pair_idxs[0], self.save_dirs, self.im_spacing, displacement_mean_mm[0], displacement_std_dev_mm[0], self.fixed['mask'][0], 'MCMC')
 
         """
         speed
