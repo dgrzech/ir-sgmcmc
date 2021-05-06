@@ -109,10 +109,6 @@ def calc_displacement_std_dev(logger, save_dirs, displacement_mean, model):
 
     sample_var = torch.zeros_like(displacement_mean)
 
-    reader = vtkStructuredPointsReader()
-    reader.ReadAllVectorsOn()
-    reader.ReadAllScalarsOn()
-
     samples_path = save_dirs['samples'] / model
     samples_filenames = [join(samples_path, f) for f in listdir(samples_path) if isfile(join(samples_path, f)) and '.vtk' in f]
     no_samples = len(samples_filenames)
