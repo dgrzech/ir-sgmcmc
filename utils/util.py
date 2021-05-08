@@ -103,24 +103,6 @@ def load_field(file_path, dims):
 
 
 @torch.no_grad()
-def calc_displacement_std_dev(logger, save_dirs, displacement_mean_mm, model):
-    samples_path = save_dirs['samples'] / model
-    samples_filenames = [join(samples_path, f) for f in listdir(samples_path) if isfile(join(samples_path, f)) and '.vtk' in f]
-    no_samples = len(samples_filenames)
-    logger.info(f'no. samples: {no_samples}')
-    
-    dims = displacement_mean_mm.shape
-    device = displacement_mean_mm.device
-    sample_var_mm = torch.zeros_like(displacement_mean_mm)
-
-    for idx, sample_filename in enumerate(samples_filenames):
-        field_mm = load_field(sample_filename, dims).to(device)
-        sample_var_mm += (field_mm - displacement_mean_mm) ** 2
-
-    return torch.sqrt(sample_var_mm / no_samples)
-
-
-@torch.no_grad()
 def calc_DSC_GPU(im_pair_idxs, seg_fixed, seg_moving, structures_dict):
     """
     calculate the Dice scores

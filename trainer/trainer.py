@@ -6,8 +6,7 @@ import torch
 from base import BaseTrainer
 from logger import log_fields, log_hist_res, log_images, log_sample, save_displacement_mean_and_std_dev, \
     save_fixed_im, save_fixed_mask, save_moving_im, save_sample
-from utils import SGLD, SobolevGrad, Sobolev_kernel_1D, add_noise_uniform_field, calc_VD_factor, \
-    calc_displacement_std_dev, calc_metrics, \
+from utils import SGLD, SobolevGrad, Sobolev_kernel_1D, add_noise_uniform_field, calc_VD_factor, calc_metrics, \
     calc_no_non_diffeomorphic_voxels, max_field_update, rescale_residuals, sample_q_v
 
 
@@ -126,8 +125,7 @@ class Trainer(BaseTrainer):
 
         for iter_no in range(self.start_iter_VI, self.no_iters_VI + 1):
             # needed to calculate the maximum update in terms of the L2 norm
-            if iter_no % self.log_period_VI == 0 or iter_no == self.no_iters_VI:
-                var_params_q_v_prev = {k: v.detach().clone() for k, v in var_params_q_v.items()}
+            var_params_q_v_prev = {k: v.detach().clone() for k, v in var_params_q_v.items()}
 
             v_sample1_unsmoothed, v_sample2_unsmoothed = sample_q_v(var_params_q_v, no_samples=2)
 
@@ -200,11 +198,11 @@ class Trainer(BaseTrainer):
                 self.metrics.update('VI/train/reg/energy', aux['reg_energy'].item())
                 self.metrics.update('VI/train/no_non_diffeomorphic_voxels', aux['no_non_diffeomorphic_voxels'].item())
 
-                if iter_no % self.log_period_VI == 0 or iter_no == self.no_iters_VI:
-                    for key in var_params_q_v:
-                        max_update, max_update_idx = max_field_update(var_params_q_v_prev[key], var_params_q_v[key])
-                        self.metrics.update('VI/train/max_updates/' + key, max_update.item())
+                for key in var_params_q_v:
+                    max_update, max_update_idx = max_field_update(var_params_q_v_prev[key], var_params_q_v[key])
+                    self.metrics.update('VI/train/max_updates/' + key, max_update.item())
 
+                if iter_no % self.log_period_VI == 0 or iter_no == self.no_iters_VI:
                     # metrics
                     seg_moving_warped = self.registration_module(moving['seg'], output['transformation'])
                     ASD, DSC = calc_metrics(im_pair_idxs, self.fixed['seg'], seg_moving_warped, self.structures_dict, self.im_spacing)
@@ -227,17 +225,16 @@ class Trainer(BaseTrainer):
         metrics
         """
 
+        dims = self.data_loader.dims
+        samples = torch.zeros([self.no_samples_VI_test, 3, *dims])
+
         for test_sample_no in range(1, self.no_samples_VI_test + 1):
             self.writer.set_step(test_sample_no)
 
             v_sample = sample_q_v(var_params_q_v, no_samples=1)
             v_sample_smoothed = SobolevGrad.apply(v_sample, self.S, self.padding)
             transformation, displacement = self.transformation_module(v_sample_smoothed)
-
-            try:
-                displacement_mean += displacement.detach().clone()
-            except:
-                displacement_mean = displacement.detach().clone()
+            samples[test_sample_no - 1] = displacement.clone().cpu()
 
             no_non_diffeomorphic_voxels, log_det_J = calc_no_non_diffeomorphic_voxels(transformation, self.diff_op)
             self.metrics.update('VI/test/no_non_diffeomorphic_voxels', no_non_diffeomorphic_voxels)
@@ -255,9 +252,12 @@ class Trainer(BaseTrainer):
             save_sample(im_pair_idxs, self.save_dirs, self.im_spacing, test_sample_no, im_moving_warped, displacement, log_det_J, model='VI')
 
         self.logger.info('\ncalculating sample standard deviation of the displacement..')
-        displacement_mean_mm = displacement_mean * self.im_spacing[0] / self.no_samples_VI_test
-        displacement_std_dev_mm = calc_displacement_std_dev(self.logger, self.save_dirs, displacement_mean_mm, 'VI')
-        save_displacement_mean_and_std_dev(self.logger, im_pair_idxs[0], self.save_dirs, self.im_spacing, displacement_mean_mm[0], displacement_std_dev_mm[0], self.fixed['mask'][0], 'VI')
+
+        samples = samples.to(self.device)
+        displacement_mean = torch.mean(samples, 0)
+        displacement_std_dev = torch.std(samples, 0)
+
+        save_displacement_mean_and_std_dev(self.logger, im_pair_idxs[0], self.save_dirs, self.im_spacing, displacement_mean, displacement_std_dev, self.fixed['mask'][0], 'VI')
 
         """
         speed
@@ -336,7 +336,12 @@ class Trainer(BaseTrainer):
         self.__SGLD_init(var_params_q_v)
         data_loss, reg_loss = self.losses['data']['loss'], self.losses['reg']['loss']
 
+        dims = self.data_loader.dims
+        no_samples = self.no_samples_MCMC // self.log_period_MCMC
+        samples = torch.zeros([no_samples, 3, *dims])
+
         self.logger.info('\nBURNING IN THE MARKOV CHAIN')
+        counter = 0
 
         for sample_no in range(1, self.no_iters_burn_in + self.no_samples_MCMC + 1):
             if sample_no < self.no_iters_burn_in and sample_no % self.log_period_MCMC == 0:
@@ -386,11 +391,8 @@ class Trainer(BaseTrainer):
                         self.writer.set_step(sample_no - self.no_iters_burn_in)
 
                         displacement = output['displacement']
-
-                        try:
-                            displacement_mean += displacement
-                        except:
-                            displacement_mean = displacement.detach().clone()
+                        samples[counter] = displacement[0].detach().cpu()
+                        counter += 1
 
                         transformation = output['transformation']
                         no_non_diffeomorphic_voxels, log_det_J = calc_no_non_diffeomorphic_voxels(transformation, self.diff_op)
@@ -421,11 +423,12 @@ class Trainer(BaseTrainer):
 
         with torch.no_grad():
             self.logger.info('\ncalculating sample standard deviation of the displacement..')
-            no_samples = self.no_samples_MCMC / self.log_period_MCMC
 
-            displacement_mean_mm = displacement_mean * self.im_spacing[0] / no_samples
-            displacement_std_dev_mm = calc_displacement_std_dev(self.logger, self.save_dirs, displacement_mean_mm, 'MCMC')
-            save_displacement_mean_and_std_dev(self.logger, im_pair_idxs[0], self.save_dirs, self.im_spacing, displacement_mean_mm[0], displacement_std_dev_mm[0], self.fixed['mask'][0], 'MCMC')
+            samples = samples.to(self.device)
+            displacement_mean = torch.mean(samples, 0)
+            displacement_std_dev = torch.std(samples, 0)
+
+            save_displacement_mean_and_std_dev(self.logger, im_pair_idxs[0], self.save_dirs, self.im_spacing, displacement_mean, displacement_std_dev, self.fixed['mask'][0], 'MCMC')
 
         """
         speed
