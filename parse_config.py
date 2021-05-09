@@ -146,13 +146,14 @@ class ConfigParser:
 
         cfg_data_loss = self['data_loss']['args']
         no_components = cfg_data_loss['no_components']
+        no_chains = self['trainer']['no_chains']
         
         # model parameters: GMM
-        GMM_scales_VI = ['VI/train/GMM/scale_' + str(idx) for idx in range(no_components)]
-        GMM_scales_MCMC = ['MCMC/GMM/scale_' + str(idx) for idx in range(no_components)]
+        GMM_scales_VI = [f'VI/train/GMM/scale_{idx}' for idx in range(no_components)]
+        GMM_scales_MCMC = [f'MCMC/GMM/scale_{idx}' for idx in range(no_components)]
 
-        GMM_proportions_VI = ['VI/train/GMM/proportion_' + str(idx) for idx in range(no_components)]
-        GMM_proportions_MCMC = ['MCMC/GMM/proportion_' + str(idx) for idx in range(no_components)]
+        GMM_proportions_VI = [f'VI/train/GMM/proportion_{idx}' for idx in range(no_components)]
+        GMM_proportions_MCMC = [f'MCMC/GMM/proportion_{idx}' for idx in range(no_components)]
 
         GMM_params = GMM_scales_VI + GMM_scales_MCMC + GMM_proportions_VI + GMM_proportions_MCMC
         model_params.extend(GMM_params)
@@ -169,29 +170,32 @@ class ConfigParser:
             model_params.extend(reg_params)
 
         # virtual decimation
-        VD = ['VI/train/VD/alpha', 'MCMC/VD/alpha']
+        VD = ['VI/train/VD/alpha'] + [f'MCMC/chain_{idx}/VD/alpha' for idx in range(no_chains)]
         model_params.extend(VD)
 
         # losses
         loss_terms_VI = ['VI/train/data_term', 'VI/train/reg_term', 'VI/train/entropy_term', 'VI/train/total_loss']
-        loss_terms_MCMC = ['MCMC/data_term', 'MCMC/reg_term', 'MCMC/total_loss']
+
+        terms = ['data_term', 'reg_term']
+        loss_terms_MCMC = [f'MCMC/chain_{idx}/{term}' for term in terms for idx in range(no_chains)] + ['MCMC/avg_loss']
 
         losses = loss_terms_VI + loss_terms_MCMC
 
         # other
-        other = ['VI/train/reg/energy'] + ['MCMC/reg/energy'] + ['VI/train/max_updates/' + parameter for parameter in ['mu', 'log_var', 'u']]
+        other = ['VI/train/reg/energy'] + [f'MCMC/chain_{idx}/reg/energy' for idx in range(no_chains)] + \
+                ['VI/train/max_updates/' + parameter for parameter in ['mu', 'log_var', 'u']]
 
         # metrics
         modes = ['train', 'test']
         
-        ASD_VI = ['VI/' + mode + '/ASD/' + structure for structure in self.structures_dict for mode in modes]
-        DSC_VI = ['VI/' + mode + '/DSC/' + structure for structure in self.structures_dict for mode in modes]
+        ASD_VI = [f'VI/{mode}/ASD/{structure}' for structure in self.structures_dict for mode in modes]
+        DSC_VI = [f'VI/{mode}/DSC/{structure}' for structure in self.structures_dict for mode in modes]
 
-        ASD_MCMC = ['MCMC/ASD/' + structure for structure in self.structures_dict]
-        DSC_MCMC = ['MCMC/DSC/' + structure for structure in self.structures_dict]
+        ASD_MCMC = [f'MCMC/chain_{idx}/ASD/{structure}' for structure in self.structures_dict for idx in range(no_chains)]
+        DSC_MCMC = [f'MCMC/chain_{idx}/DSC/{structure}' for structure in self.structures_dict for idx in range(no_chains)]
         
-        no_non_diffeomorphic_voxels_VI = ['VI/' + mode + '/no_non_diffeomorphic_voxels' for mode in modes]
-        no_non_diffeomorphic_voxels_MCMC = ['MCMC/no_non_diffeomorphic_voxels']
+        no_non_diffeomorphic_voxels_VI = [f'VI/{mode}/no_non_diffeomorphic_voxels' for mode in modes]
+        no_non_diffeomorphic_voxels_MCMC = [f'MCMC/chain_{idx}/no_non_diffeomorphic_voxels' for idx in range(no_chains)]
 
         metrics = ASD_VI + ASD_MCMC + DSC_VI + DSC_MCMC + no_non_diffeomorphic_voxels_VI + no_non_diffeomorphic_voxels_MCMC
         return model_params + losses + metrics + other

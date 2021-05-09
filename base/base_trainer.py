@@ -16,12 +16,9 @@ class BaseTrainer:
         self.device = 'cuda:0'
 
         self.data_loader = data_loader
-        self.im_spacing, self.structures_dict = self.data_loader.im_spacing, self.config.structures_dict
+        self.structures_dict = self.config.structures_dict
         self.save_dirs = self.data_loader.save_dirs
 
-        # all-to-one registration
-        self.fixed = {k: v.to(self.device) for k, v in self.data_loader.fixed.items()}
-        
         # losses
         self.losses = dict()
 
@@ -45,7 +42,8 @@ class BaseTrainer:
         self.log_period_VI = cfg_trainer['log_period_VI']
 
         self.MCMC = cfg_trainer['MCMC']
-        self.MCMC_init = cfg_trainer['MCMC_init']  # one of ['VI', 'identity', 'noise']
+        self.MCMC_init = cfg_trainer['MCMC_init']  # NOTE (DG): one of ['VI', 'identity', 'noise']
+        self.no_chains = int(cfg_trainer['no_chains'])
         self.no_samples_MCMC = int(cfg_trainer['no_samples_MCMC'])
         self.no_iters_burn_in = int(cfg_trainer['no_iters_burn_in'])
         self.log_period_MCMC = cfg_trainer['log_period_MCMC']

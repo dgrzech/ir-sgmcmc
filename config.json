@@ -102,16 +102,17 @@
 		"VI": true,
 		"MCMC": true,
 		"MCMC_init": "VI",
-		"uniform_noise": {
-			"enabled": true,
-			"magnitude": 0.1
-		},
 		"no_iters_VI": 1536,
-		"no_samples_VI_test": 100,
+		"no_samples_VI_test": 500,
+		"no_chains": 2,
 		"no_iters_burn_in": 100000,
 		"no_samples_MCMC": 1000000,
 		"log_period_VI": 128,
 		"log_period_MCMC": 2000,
+		"uniform_noise": {
+			"enabled": true,
+			"magnitude": 0.1
+		},
 		"tensorboard": true,
 		"verbosity": 2,
 		"save_dir": "saved/"

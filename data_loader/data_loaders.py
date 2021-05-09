@@ -14,10 +14,6 @@ class BiobankDataLoader(BaseDataLoader):
         return self.dataset.dims
 
     @property
-    def fixed(self):
-        return self.dataset.fixed
-
-    @property
     def im_spacing(self):
         return self.dataset.im_spacing
 

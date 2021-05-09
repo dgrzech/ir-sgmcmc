@@ -36,19 +36,6 @@ class BiobankDataset(Dataset):
         with open(txt_file_path, 'w') as out:
             json.dump(dict(enumerate(self.im_mask_seg_triples)), out, indent=4, sort_keys=True)
 
-        # pre-load im_fixed, the segmentation, and the mask
-        fixed_triple = self.im_mask_seg_triples.pop(0)
-
-        im_fixed_path = fixed_triple['im']
-        mask_fixed_path = fixed_triple['mask']
-        seg_fixed_path = fixed_triple['seg']
-
-        im_fixed = self._get_image(im_fixed_path).unsqueeze(0)
-        mask_fixed = self._get_mask(mask_fixed_path).unsqueeze(0)
-        seg_fixed = self._get_seg(seg_fixed_path).unsqueeze(0)
-
-        self.fixed = {'im': im_fixed, 'mask': mask_fixed, 'seg': seg_fixed}
-
     def __len__(self):
         return 1
 
@@ -110,19 +97,33 @@ class BiobankDataset(Dataset):
         return F.interpolate(seg, size=self.dims, mode='nearest').short().squeeze(0)
 
     def __getitem__(self, idx):
-        im_moving_path = self.im_mask_seg_triples[idx]['im']
-        mask_moving_path = self.im_mask_seg_triples[idx]['mask']
-        seg_moving_path = self.im_mask_seg_triples[idx]['seg']
+        # fixed
+        im_fixed_path = self.im_mask_seg_triples[0]['im']
+        mask_fixed_path = self.im_mask_seg_triples[0]['mask']
+        seg_fixed_path = self.im_mask_seg_triples[0]['seg']
+
+        im_fixed = self._get_image(im_fixed_path)
+        mask_fixed = self._get_mask(mask_fixed_path)
+        seg_fixed = self._get_seg(seg_fixed_path)
+
+        fixed = {'im': im_fixed, 'mask': mask_fixed, 'seg': seg_fixed}
+
+        # moving
+        im_moving_path = self.im_mask_seg_triples[idx + 1]['im']
+        mask_moving_path = self.im_mask_seg_triples[idx + 1]['mask']
+        seg_moving_path = self.im_mask_seg_triples[idx + 1]['seg']
 
         im_moving = self._get_image(im_moving_path)
         mask_moving = self._get_mask(mask_moving_path)
         seg_moving = self._get_seg(seg_moving_path)
 
+        moving = {'im': im_moving, 'mask': mask_moving, 'seg': seg_moving}
+
+        # q_v
         mu_v = self._init_mu_v()
         log_var_v = self._init_log_var_v()
         u_v = self._init_u_v()
 
-        moving = {'im': im_moving, 'mask': mask_moving, 'seg': seg_moving}
         var_params_q_v = {'mu': mu_v, 'log_var': log_var_v, 'u': u_v}
 
-        return idx, moving, var_params_q_v
+        return fixed, moving, var_params_q_v

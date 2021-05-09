@@ -1,8 +1,6 @@
 import json
 from collections import OrderedDict
 from itertools import repeat
-from os import listdir
-from os.path import isfile, join
 from pathlib import Path
 
 import SimpleITK as sitk
@@ -103,55 +101,60 @@ def load_field(file_path, dims):
 
 
 @torch.no_grad()
-def calc_DSC_GPU(im_pair_idxs, seg_fixed, seg_moving, structures_dict):
+def calc_posterior_statistics(samples, device='cuda:0'):
+    samples = samples.to(device)
+    mean, std_dev = torch.mean(samples, dim=0), torch.std(samples, dim=0)
+    del samples
+
+    return mean, std_dev
+
+
+@torch.no_grad()
+def calc_DSC_GPU(no_samples, seg_fixed, seg_moving, structures_dict):
     """
     calculate the Dice scores
     """
 
-    DSC_batch = dict()  # dict. with Dice scores for each image pair and segmentation
+    DSC = torch.zeros(no_samples, len(structures_dict))
 
-    for idx, im_pair in enumerate(im_pair_idxs):
-        DSC = dict()  # dict. with Dice scores for the image pair
+    for idx in range(no_samples):
+        seg_fixed_sample = seg_fixed[idx]
+        seg_moving_sample = seg_moving[idx]
 
-        seg_fixed_im_pair = seg_fixed[idx]
-        seg_moving_im_pair = seg_moving[idx]
-
-        for structure in structures_dict:
+        for structure_idx, structure in enumerate(structures_dict):
             label = structures_dict[structure]
 
-            numerator = 2.0 * ((seg_fixed_im_pair == label) * (seg_moving_im_pair == label)).sum().item()
-            denominator = (seg_fixed_im_pair == label).sum().item() + (seg_moving_im_pair == label).sum().item()
+            numerator = 2.0 * ((seg_fixed_sample == label) * (seg_moving_sample == label)).sum()
+            denominator = (seg_fixed_sample == label).sum() + (seg_moving_sample == label).sum()
 
             try:
                 score = numerator / denominator
             except:
                 score = 0.0
 
-            DSC[structure] = score
+            DSC[idx, structure_idx] = score
 
-        DSC_batch[im_pair] = DSC
-
-    return DSC_batch
+    return DSC.numpy()
 
 
 @torch.no_grad()
-def calc_metrics(im_pair_idxs, seg_fixed, seg_moving, structures_dict, spacing, GPU=True):
+def calc_metrics(seg_fixed, seg_moving, structures_dict, spacing, GPU=True, no_samples=1):
     """
     calculate average surface distances and Dice scores
     """
 
     hausdorff_distance_filter = sitk.HausdorffDistanceImageFilter()
-
-    ASD, DSC = torch.zeros(len(im_pair_idxs), len(structures_dict), device=seg_fixed.device), \
-               torch.zeros(len(im_pair_idxs), len(structures_dict), device=seg_fixed.device)
+    ASD = np.zeros([no_samples, len(structures_dict)])
 
     if GPU:
-        DSCs = calc_DSC_GPU(im_pair_idxs, seg_fixed, seg_moving, structures_dict)
+        DSC = calc_DSC_GPU(no_samples, seg_fixed, seg_moving, structures_dict)
     else:
+        DSC = np.zeros([no_samples, len(structures_dict)])
         overlap_measures_filter = sitk.LabelOverlapMeasuresImageFilter()
 
-    seg_fixed_arr = seg_fixed[0].squeeze().cpu().numpy()
+    seg_fixed = seg_fixed.cpu().numpy()
     seg_moving = seg_moving.cpu().numpy()
+
     spacing = spacing.numpy().tolist()
 
     def calc_ASD(seg_fixed_im, seg_moving_im):
@@ -165,8 +168,9 @@ def calc_metrics(im_pair_idxs, seg_fixed, seg_moving, structures_dict, spacing, 
         overlap_measures_filter.Execute(seg_fixed_im, seg_moving_im)
         return overlap_measures_filter.GetDiceCoefficient()
 
-    for loop_idx, im_pair_idx in enumerate(im_pair_idxs):
-        seg_moving_arr = seg_moving[loop_idx].squeeze()
+    for idx in range(no_samples):
+        seg_fixed_arr = seg_fixed[idx].squeeze()
+        seg_moving_arr = seg_moving[idx].squeeze()
 
         for structure_idx, structure_name in enumerate(structures_dict):
             label = structures_dict[structure_name]
@@ -181,22 +185,20 @@ def calc_metrics(im_pair_idxs, seg_fixed, seg_moving, structures_dict, spacing, 
             seg_moving_im.SetSpacing(spacing)
 
             try:
-                ASD[loop_idx, structure_idx] = calc_ASD(seg_fixed_im, seg_moving_im)
+                ASD[idx, structure_idx] = calc_ASD(seg_fixed_im, seg_moving_im)
             except:
-                ASD[loop_idx, structure_idx] = np.inf
+                ASD[idx, structure_idx] = np.inf
 
-            if GPU:
-                DSC[loop_idx, structure_idx] = DSCs[im_pair_idx][structure_name]
-            else:
-                DSC[loop_idx, structure_idx] = calc_DSC(seg_fixed_im, seg_moving_im)
+            if not GPU:
+                DSC[idx, structure_idx] = calc_DSC(seg_fixed_im, seg_moving_im)
 
     return ASD, DSC
 
 
 def calc_no_non_diffeomorphic_voxels(transformation, diff_op):
     nabla = diff_op(transformation, transformation=True)
-    log_det_J_transformation = torch.log(calc_det_J(nabla))
-    return torch.sum(torch.isnan(log_det_J_transformation), dim=(1, 2, 3)), log_det_J_transformation
+    log_det_J_transformation = calc_det_J(nabla).log()
+    return torch.isnan(log_det_J_transformation).sum(dim=(1, 2, 3)).cpu().numpy(), log_det_J_transformation
 
 
 def calc_norm(field):

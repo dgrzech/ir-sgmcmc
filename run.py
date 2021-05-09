@@ -1,9 +1,6 @@
 import argparse
 from datetime import datetime
 
-import numpy as np
-import torch
-
 from parse_config import ConfigParser
 from trainer import Trainer
 
