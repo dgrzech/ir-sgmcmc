@@ -7,7 +7,8 @@ from base import BaseTrainer
 from logger import log_fields, log_hist_res, log_images, log_sample, save_displacement_mean_and_std_dev, \
     save_fixed_im, save_fixed_mask, save_moving_im, save_sample
 from utils import SGLD, SobolevGrad, Sobolev_kernel_1D, add_noise_uniform_field, calc_posterior_statistics,\
-    calc_VD_factor, calc_metrics, calc_no_non_diffeomorphic_voxels, calc_norm, max_field_update, rescale_residuals, sample_q_v
+    calc_VD_factor, calc_metrics, calc_no_non_diffeomorphic_voxels, calc_norm, max_field_update, rescale_residuals, \
+    sample_q_v
 
 
 class Trainer(BaseTrainer):
@@ -42,20 +43,19 @@ class Trainer(BaseTrainer):
         for param_key in var_params_q_v:
             var_params_q_v[param_key].requires_grad_(True)
 
-        trainable_params_q_v = filter(lambda p: p.requires_grad, var_params_q_v.values())
-        self.optimizer_q_v = self.config.init_obj('optimizer_q_v', torch.optim, trainable_params_q_v)
+        self.optimizer_q_v = self.config.init_optimizer_q_v(var_params_q_v)
 
     def __init_optimizer_GMM(self):
         self.optimizer_GMM = self.config.init_optimizer_GMM(self.losses['data']['loss'])
-
-    def __init_optimizer_SG_MCMC(self):
-        self.optimizer_SG_MCMC = self.config.init_obj('optimizer_SG_MCMC', torch.optim, [self.v_curr_state])
 
     def __init_optimizer_reg(self):
         reg_loss = self.losses['reg']['loss']
 
         if reg_loss.learnable:
-            self.optimizer_reg = self.config.init_obj('optimizer_reg', torch.optim, reg_loss.parameters())
+            self.optimizer_reg = self.config.init_optimizer_reg(reg_loss)
+
+    def __init_optimizer_SG_MCMC(self):
+        self.optimizer_SG_MCMC = self.config.init_obj('optimizer_SG_MCMC', torch.optim, [self.v_curr_state])
 
     def _init_optimizers(self):
         self.optimizer_q_v, self.optimizer_SG_MCMC = None, None

@@ -48,23 +48,24 @@
 	"optimizer_q_v": {
 		"type": "Adam",
 		"args": {
-			"lr": 0.005
+			"lr_mu": 0.005,
+			"lr_log_var": 0.005,
+			"lr_u": 0.005
 		}
 	},
 	"optimizer_GMM": {
 		"type": "Adam",
 		"args": {
-			"lr_log_std": 0.1,
-			"lr_logits": 0.01,
-			"betas": [0.9, 0.95],
+			"lr_log_std": 0.2,
+			"lr_logits": 0.2,
 			"lr_decay": 0.001
 		}
 	},
 	"optimizer_reg": {
 		"type": "Adam",
 		"args": {
-			"lr": 0.01,
-			"betas": [0.9, 0.95]
+			"lr_log_w_reg": 0.01,
+			"lr_decay": 0.001
 		}
 	},
 	"optimizer_SG_MCMC": {
@@ -93,12 +94,12 @@
 		"MCMC": false,
 		"MCMC_init": "VI",
 		"no_iters_VI": 1536,
-		"no_samples_VI_test": 500,
+		"no_samples_VI_test": 100,
 		"no_chains": 2,
 		"no_iters_burn_in": 100000,
 		"no_samples_MCMC": 1000000,
 		"log_period_VI": 128,
-		"log_period_MCMC": 2000,
+		"log_period_MCMC": 20000,
 		"uniform_noise": {
 			"enabled": true,
 			"magnitude": 0.1

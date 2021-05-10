@@ -5,6 +5,7 @@ from operator import getitem
 from pathlib import Path
 
 import numpy as np
+import torch
 
 import data_loader.data_loaders as module_data
 import model.distributions as model_distr
@@ -203,20 +204,42 @@ class ConfigParser:
     def init_transformation_and_registration_modules(self):
         self['transformation_module']['args']['dims'] = self['data_loader']['args']['dims']
 
-        return self.init_obj('transformation_module', transformation), \
-               self.init_obj('registration_module', registration)
+        return self.init_obj('transformation_module', transformation), self.init_obj('registration_module', registration)
 
     def init_optimizer_GMM(self, data_loss):
         if self['optimizer_GMM']['type'] != 'Adam':
             print('only the Adam optimiser is supported for the GMM, exiting..')
-            exit()
+            raise
 
         cfg_optimizer_GMM = self['optimizer_GMM']['args']
-        optimizer_GMM = Adam([{'params': [data_loss.log_std], 'lr': cfg_optimizer_GMM['lr_log_std']},
-                              {'params': [data_loss.logits], 'lr': cfg_optimizer_GMM['lr_logits']}],
-                             lr=cfg_optimizer_GMM['lr_logits'], betas=cfg_optimizer_GMM['betas'], lr_decay=cfg_optimizer_GMM['lr_decay'])
 
-        return optimizer_GMM
+        return Adam([{'params': [data_loss.log_std], 'lr': cfg_optimizer_GMM['lr_log_std']},
+                     {'params': [data_loss.logits], 'lr': cfg_optimizer_GMM['lr_logits']}],
+                    lr_decay=cfg_optimizer_GMM['lr_decay'])
+
+    def init_optimizer_q_v(self, var_params_q_v):
+        cfg_optimizer_q_v = self['optimizer_q_v']['args']
+
+        return torch.optim.Adam([{'params': [var_params_q_v['mu']], 'lr': cfg_optimizer_q_v['lr_mu']},
+                                 {'params': [var_params_q_v['log_var']], 'lr': cfg_optimizer_q_v['lr_log_var']},
+                                 {'params': [var_params_q_v['u']], 'lr': cfg_optimizer_q_v['lr_u']}])
+
+    def init_optimizer_reg(self, reg_loss):
+        if self['optimizer_reg']['type'] != 'Adam':
+            print('only the Adam optimiser is supported for the regularisation, exiting..')
+            raise
+
+        cfg_optimizer_reg = self['optimizer_reg']['args']
+
+        if reg_loss.__class__.__name__ == 'RegLoss_LogNormal':
+            optimizer_reg = Adam([{'params': [reg_loss.loc], 'lr': cfg_optimizer_reg['lr_loc']},
+                                  {'params': [reg_loss.log_scale], 'lr': cfg_optimizer_reg['lr_log_scale']}],
+                                 lr_decay=cfg_optimizer_reg['lr_decay'])
+        elif reg_loss.__class__.__name__ == 'RegLoss_L2':
+            optimizer_reg = Adam(reg_loss.parameters(), lr=cfg_optimizer_reg['lr_log_w_reg'],
+                                 lr_decay=cfg_optimizer_reg['lr_decay'])
+
+        return optimizer_reg
 
     def init_obj(self, name, module, *args, **kwargs):
         """
