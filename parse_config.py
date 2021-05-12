@@ -99,6 +99,12 @@ class ConfigParser:
 
     def init_data_loader(self):
         self['data_loader']['args']['save_dirs'] = self.save_dirs
+
+        try:
+            self['data_loader']['args']['cps'] = self['transformation_module']['args']['cps']
+        except:
+            pass
+
         return self.init_obj('data_loader', module_data)
 
     def init_losses(self):

@@ -7,17 +7,25 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from torch.utils.data import Dataset
+from utils import get_control_grid_size
 
 
 class BiobankDataset(Dataset):
-    def __init__(self, dims, im_paths, save_paths, sigma_v_init, u_v_init):
+    def __init__(self, dims, im_paths, save_paths, sigma_v_init, u_v_init, cps=None):
         self.im_paths = im_paths
         self.save_paths = save_paths
 
         self.sigma_v_init, self.u_v_init = sigma_v_init, u_v_init
 
         self.dims = dims
-        self.dims_im, self.dims_v = (1, *dims), (3, *dims)
+        self.dims_im = (1, *dims)
+
+        if cps is None:
+            self.dims_v = (3, *dims)
+        else:
+            control_grid_size = get_control_grid_size(dims, cps)
+            self.dims_v = (3, *control_grid_size)
+
         self.padding, self.im_spacing = None, None
 
         # image filenames

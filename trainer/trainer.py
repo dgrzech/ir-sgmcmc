@@ -572,7 +572,7 @@ class Trainer(BaseTrainer):
     @torch.no_grad()
     def __SGLD_init(self, var_params_q_v):
         if self.MCMC_init == 'VI':
-            v_curr_state = torch.empty([self.no_chains, 3, *self.dims], device=self.device)
+            v_curr_state = torch.empty([self.no_chains, 3, *var_params_q_v['mu'].shape[2:]], device=self.device)
 
             for idx in range(self.no_chains):
                 v_curr_state[idx] = sample_q_v(var_params_q_v, no_samples=1).detach()
@@ -582,9 +582,9 @@ class Trainer(BaseTrainer):
 
         elif self.MCMC_init in ['identity', 'noise']:
             if self.MCMC_init == 'identity':
-                v_curr_state = torch.zeros([self.no_chains, 3, *self.dims], device=self.device)
+                v_curr_state = torch.zeros([self.no_chains, 3, *var_params_q_v['mu'].shape[2:]], device=self.device)
             elif self.MCMC_init == 'noise':
-                v_curr_state = torch.randn([self.no_chains, 3, *self.dims], device=self.device)
+                v_curr_state = torch.randn([self.no_chains, 3, *var_params_q_v['mu'].shape[2:]], device=self.device)
 
             sigma = torch.ones_like(v_curr_state)
 

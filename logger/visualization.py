@@ -181,7 +181,8 @@ def fields_grid(mu_v_norm_slices, displacement_norm_slices, sigma_v_norm_slices,
 
 
 def log_fields(writer, var_params_batch, displacement_batch, log_det_J_batch):
-    mid_idxs = get_im_or_field_mid_slices_idxs(displacement_batch)
+    mid_idxs_ims = get_im_or_field_mid_slices_idxs(displacement_batch)
+    mid_idxs_params = get_im_or_field_mid_slices_idxs(var_params_batch['mu'])
 
     mu_v_norm = calc_norm(var_params_batch['mu'])[0, 0].cpu().numpy()
     sigma_v_norm = calc_norm(torch.exp(0.5 * var_params_batch['log_var']))[0, 0].cpu().numpy()
@@ -190,12 +191,12 @@ def log_fields(writer, var_params_batch, displacement_batch, log_det_J_batch):
     displacement_norm = calc_norm(displacement_batch)[0, 0].cpu().numpy()
     log_det_J = log_det_J_batch[0].cpu().numpy()
 
-    mu_v_norm_slices = get_slices(mu_v_norm, mid_idxs)
-    sigma_v_norm_slices = get_slices(sigma_v_norm, mid_idxs)
-    u_v_norm_slices = get_slices(u_v_norm, mid_idxs)
+    mu_v_norm_slices = get_slices(mu_v_norm, mid_idxs_params)
+    sigma_v_norm_slices = get_slices(sigma_v_norm, mid_idxs_params)
+    u_v_norm_slices = get_slices(u_v_norm, mid_idxs_params)
 
-    displacement_norm_slices = get_slices(displacement_norm, mid_idxs)
-    log_det_J_slices = get_slices(log_det_J, mid_idxs)
+    displacement_norm_slices = get_slices(displacement_norm, mid_idxs_ims)
+    log_det_J_slices = get_slices(log_det_J, mid_idxs_ims)
 
     writer.add_figure('VI/q_v', fields_grid(mu_v_norm_slices, displacement_norm_slices, sigma_v_norm_slices, u_v_norm_slices, log_det_J_slices))
 
@@ -237,17 +238,18 @@ def sample_grid(im_moving_warped_slices, v_norm_slices, displacement_norm_slices
 
 
 def log_sample(writer, chain_idx, im_moving_warped, v_norm, displacement_norm, log_det_J):
-    mid_idxs = get_im_or_field_mid_slices_idxs(v_norm)
+    mid_idxs_params = get_im_or_field_mid_slices_idxs(v_norm)
+    mid_idxs_ims = get_im_or_field_mid_slices_idxs(im_moving_warped)
 
     im_moving_warped = im_moving_warped[chain_idx, 0].cpu().numpy()
     v_norm = v_norm[chain_idx, 0].cpu().numpy()
     displacement_norm = displacement_norm[chain_idx, 0].cpu().numpy()
     log_det_J = log_det_J[chain_idx].cpu().numpy()
 
-    im_moving_warped_slices = get_slices(im_moving_warped, mid_idxs)
-    v_norm_slices = get_slices(v_norm, mid_idxs)
-    displacement_norm_slices = get_slices(displacement_norm, mid_idxs)
-    log_det_J_slices = get_slices(log_det_J, mid_idxs)
+    im_moving_warped_slices = get_slices(im_moving_warped, mid_idxs_ims)
+    v_norm_slices = get_slices(v_norm, mid_idxs_params)
+    displacement_norm_slices = get_slices(displacement_norm, mid_idxs_ims)
+    log_det_J_slices = get_slices(log_det_J, mid_idxs_ims)
 
     writer.add_figure(f'MCMC/chain_{chain_idx}/samples',
                       sample_grid(im_moving_warped_slices, v_norm_slices, displacement_norm_slices, log_det_J_slices))
