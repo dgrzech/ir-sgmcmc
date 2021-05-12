@@ -3,7 +3,7 @@ import numpy as np
 import torch
 import unittest
 
-from utils import init_identity_grid_3D, GradientOperator, RegistrationModule
+from utils import get_control_grid_size, init_identity_grid_3D, GradientOperator, RegistrationModule
 
 # fix random seeds for reproducibility
 SEED = 123
@@ -30,6 +30,9 @@ dims_2D = (N_large, ) * 2
 dim_x = dim_y = dim_z = N_large
 dims = (N_large, ) * 3
 dims_v = (1, 3, *dims)
+
+cps = (4, ) * len(dims)  # for use with B-splines
+control_grid_size = get_control_grid_size(dims, cps)
 
 # transformations
 identity_grid = init_identity_grid_3D(dims).to(device)
