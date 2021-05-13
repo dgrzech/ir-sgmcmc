@@ -91,15 +91,15 @@ images
 """
 
 
-def im_grid(im_fixed_slices, im_moving_slices, im_moving_warped_slices):
+def im_grid(im_fixed_slices, im_moving_slices, im_moving_warped_slices, im_diff_slices):
     """
     plot of input and output images to log in tensorboard
     """
 
-    fig, axs = plt.subplots(nrows=3, ncols=3, sharex=True, sharey=True, figsize=(8, 8))
+    fig, axs = plt.subplots(nrows=4, ncols=3, sharex=True, sharey=True, figsize=(8, 8))
 
     cols = ['axial', 'coronal', 'sagittal']
-    rows = ['im_fixed', 'im_moving', 'im_moving_warped']
+    rows = ['im_fixed', 'im_moving', 'im_moving_warped', 'im_diff']
 
     for ax, col in zip(axs[0], cols):
         ax.set_title(col)
@@ -117,6 +117,7 @@ def im_grid(im_fixed_slices, im_moving_slices, im_moving_warped_slices):
         axs[0, i].imshow(im_flip(im_fixed_slices[i]), cmap='gray')
         axs[1, i].imshow(im_flip(im_moving_slices[i]), cmap='gray')
         axs[2, i].imshow(im_flip(im_moving_warped_slices[i]), cmap='gray')
+        axs[3, i].imshow(im_flip(im_diff_slices[i]), cmap='gray')
 
     return fig
 
@@ -135,12 +136,14 @@ def log_images(writer, im_fixed_batch, im_moving_batch, im_moving_warped_batch):
     im_fixed = im_fixed_batch[0, 0].cpu().numpy()
     im_moving = im_moving_batch[0, 0].cpu().numpy()
     im_moving_warped = im_moving_warped_batch[0, 0].cpu().numpy()
+    im_diff = torch.abs(im_fixed_batch - im_moving_warped_batch)[0, 0].cpu().numpy()
 
     im_fixed_slices = get_slices(im_fixed, mid_idxs)
     im_moving_slices = get_slices(im_moving, mid_idxs)
     im_moving_warped_slices = get_slices(im_moving_warped, mid_idxs)
+    im_diff_slices = get_slices(im_diff, mid_idxs)
 
-    writer.add_figure('VI/images', im_grid(im_fixed_slices, im_moving_slices, im_moving_warped_slices))
+    writer.add_figure('VI/images', im_grid(im_fixed_slices, im_moving_slices, im_moving_warped_slices, im_diff_slices))
 
 
 """
