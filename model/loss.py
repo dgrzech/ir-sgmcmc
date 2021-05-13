@@ -51,13 +51,10 @@ class GMM(DataLoss):
         self.register_buffer('_log_sqrt_2pi', torch.tensor(0.5 * math.log(2.0 * math.pi)))
 
         # parameters of LCC
-        self.s = s
-        self.padding = (s, s, s, s, s, s)
+        self.kernel_sz = s * 2 + 1
+        self.sz = float(self.kernel_sz ** 3)
 
-        self.kernel_size = self.s * 2 + 1
-        self.sz = float(self.kernel_size ** 3)
-
-        self.kernel = nn.Conv3d(1, 1, kernel_size=self.kernel_size, stride=1, padding=s, bias=False, padding_mode='replicate')
+        self.kernel = nn.Conv3d(1, 1, kernel_size=self.kernel_sz, stride=1, padding=s, bias=False, padding_mode='replicate')
         nn.init.ones_(self.kernel.weight)
         self.kernel.weight.requires_grad_(False)
 

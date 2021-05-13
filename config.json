@@ -96,7 +96,7 @@
 	},
 	"Sobolev_grad": {
 		"enabled": true,
-		"s": 7,
+		"s": 3,
 		"lambda": 0.5
 	},
 	"virtual_decimation": true,
