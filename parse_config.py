@@ -190,7 +190,7 @@ class ConfigParser:
 
         # other
         other = ['VI/train/reg/energy'] + [f'MCMC/chain_{idx}/reg/energy' for idx in range(no_chains)] + \
-                ['VI/train/max_updates/' + parameter for parameter in ['mu', 'log_var', 'u']]
+                ['VI/train/max_updates/' + parameter for parameter in ['mu', 'log_var', 'log_u']]
 
         # metrics
         modes = ['train', 'test']
@@ -226,9 +226,10 @@ class ConfigParser:
     def init_optimizer_q_v(self, var_params_q_v):
         cfg_optimizer_q_v = self['optimizer_q_v']['args']
 
-        return torch.optim.Adam([{'params': [var_params_q_v['mu']], 'lr': cfg_optimizer_q_v['lr_mu']},
-                                 {'params': [var_params_q_v['log_var']], 'lr': cfg_optimizer_q_v['lr_log_var']},
-                                 {'params': [var_params_q_v['u']], 'lr': cfg_optimizer_q_v['lr_u']}])
+        return Adam([{'params': [var_params_q_v['mu']], 'lr': cfg_optimizer_q_v['lr_mu']},
+                     {'params': [var_params_q_v['log_var']], 'lr': cfg_optimizer_q_v['lr_log_var']},
+                     {'params': [var_params_q_v['log_u']], 'lr': cfg_optimizer_q_v['lr_log_u']}],
+                     lr_decay=cfg_optimizer_q_v['lr_decay'])
 
     def init_optimizer_reg(self, reg_loss):
         if self['optimizer_reg']['type'] != 'Adam':

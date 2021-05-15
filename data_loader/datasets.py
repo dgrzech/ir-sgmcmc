@@ -59,13 +59,13 @@ class BiobankDataset(Dataset):
 
     def _init_log_var_v(self):
         sigma_v = self.sigma_v_init
-        var_v = (sigma_v ** 2) * torch.ones(self.dims_v)
+        var_v = (sigma_v ** 2) + torch.zeros(self.dims_v)
 
-        return torch.log(var_v)
+        return var_v.log()
 
-    def _init_u_v(self):
-        u_v = self.u_v_init * torch.ones(self.dims_v)
-        return u_v
+    def _init_log_u_v(self):
+        u_v = self.u_v_init + torch.zeros(self.dims_v)
+        return u_v.log()
 
     def _get_image(self, im_path):
         im = sitk.ReadImage(im_path, sitk.sitkFloat32)
@@ -130,8 +130,8 @@ class BiobankDataset(Dataset):
         # q_v
         mu_v = self._init_mu_v()
         log_var_v = self._init_log_var_v()
-        u_v = self._init_u_v()
+        log_u_v = self._init_log_u_v()
 
-        var_params_q_v = {'mu': mu_v, 'log_var': log_var_v, 'u': u_v}
+        var_params_q_v = {'mu': mu_v, 'log_var': log_var_v, 'log_u': log_u_v}
 
         return fixed, moving, var_params_q_v

@@ -4,7 +4,7 @@
 		"type": "GMM",
 		"args": {
 			"no_components": 4,
-			"s": 3
+			"s": 1
 		}
 	},
 	"data_loss_scale_prior": {
@@ -25,14 +25,14 @@
 		"type": "RegLoss_LogNormal",
 		"args": {
 			"diff_op": "GradientOperator",
-			"w_reg": 1.2,
+			"w_reg": 1.4,
 			"learnable": true
 		}
 	},
 	"reg_loss_loc_prior": {
 		"type": "LogEnergyExpGammaPrior",
 		"args": {
-			"w_reg": 1.2,
+			"w_reg": 1.4,
 			"learnable": false
 		}
 	},
@@ -58,9 +58,10 @@
 	"optimizer_q_v": {
 		"type": "Adam",
 		"args": {
-			"lr_mu": 0.005,
-			"lr_log_var": 0.005,
-			"lr_u": 0.005
+			"lr_mu": 0.01,
+			"lr_log_var": 0.01,
+			"lr_log_u": 0.01,
+			"lr_decay": 0.001
 		}
 	},
 	"optimizer_GMM": {
@@ -91,7 +92,7 @@
 			"data_dir": "/vol/bitbucket/dig15/datasets/mine/biobank/biobank_01",
 			"dims": [128, 128, 128],
 			"sigma_v_init": 0.5,
-			"u_v_init": 0.0
+			"u_v_init": 0.1
 		}
 	},
 	"Sobolev_grad": {
@@ -104,7 +105,7 @@
 		"VI": true,
 		"MCMC": true,
 		"MCMC_init": "VI",
-		"no_iters_VI": 1536,
+		"no_iters_VI": 1024,
 		"no_samples_VI_test": 100,
 		"no_chains": 2,
 		"no_iters_burn_in": 100000,

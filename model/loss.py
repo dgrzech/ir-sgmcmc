@@ -350,18 +350,21 @@ class EntropyMultivariateNormal(Entropy):
     def forward(self, **kwargs):
         if len(kwargs) == 2:
             log_var = kwargs['log_var']
-            u = kwargs['u']
+            log_u = kwargs['log_u']
 
             sigma = torch.exp(0.5 * log_var)
+            u = torch.exp(log_u)
+
             return 0.5 * (torch.log1p(torch.sum(torch.pow(u / sigma, 2), dim=(1, 2, 3, 4))) + torch.sum(log_var, dim=(1, 2, 3, 4)))
         elif len(kwargs) == 4:
             sample = kwargs['sample']
 
             mu = kwargs['mu']
             log_var = kwargs['log_var']
-            u = kwargs['u']
+            log_u = kwargs['log_u']
 
             sigma = torch.exp(0.5 * log_var)
+            u = torch.exp(log_u)
 
             sample_n = (sample - mu) / sigma
             u_n = u / sigma
