@@ -5,7 +5,7 @@ import torch
 
 from base import BaseTrainer
 from logger import log_fields, log_hist_res, log_images, log_sample, save_displacement_mean_and_std_dev, \
-    save_fixed_im, save_fixed_mask, save_moving_im, save_sample
+    save_fixed_im, save_fixed_mask, save_moving_im, save_moving_mask, save_sample
 from utils import SGLD, SobolevGrad, Sobolev_kernel_1D, add_noise_uniform_field, calc_posterior_statistics,\
     calc_VD_factor, calc_metrics, calc_no_non_diffeomorphic_voxels, calc_norm, max_field_update, rescale_residuals, \
     sample_q_v
@@ -123,6 +123,7 @@ class Trainer(BaseTrainer):
             save_fixed_im(self.save_dirs, self.im_spacing, fixed['im'])
             save_fixed_mask(self.save_dirs, self.im_spacing, fixed['mask'])
             save_moving_im(self.save_dirs, self.im_spacing, moving['im'])
+            save_moving_mask(self.save_dirs, self.im_spacing, moving['mask'])
 
         for iter_no in range(self.start_iter_VI, self.no_iters_VI + 1):
             # needed to calculate the maximum update in terms of the L2 norm

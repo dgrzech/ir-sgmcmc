@@ -175,10 +175,6 @@ def save_fixed_im(save_dirs, spacing, im_fixed):
 
 
 def save_fixed_mask(save_dirs, spacing, mask_fixed):
-    """
-    save the input fixed image to .nii.gz
-    """
-
     mask_fixed = mask_fixed[0, 0].float().cpu().numpy()
     im_path = path.join(save_dirs['images'], 'mask_fixed.nii.gz')
     save_im_to_disk(mask_fixed, im_path, spacing)
@@ -191,6 +187,12 @@ def save_moving_im(save_dirs, spacing, im_moving_batch):
 
     im_moving = im_moving_batch[0, 0].cpu().numpy()
     save_im(save_dirs, spacing, im_moving, 'im_moving')
+
+
+def save_moving_mask(save_dirs, spacing, mask_moving):
+    mask_moving = mask_moving[0, 0].float().cpu().numpy()
+    im_path = path.join(save_dirs['images'], 'mask_moving.nii.gz')
+    save_im_to_disk(mask_moving, im_path, spacing)
 
 
 """
