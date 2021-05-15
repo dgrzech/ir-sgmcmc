@@ -255,7 +255,7 @@ class Trainer(BaseTrainer):
 
         mean, std_dev = calc_posterior_statistics(samples)
         save_displacement_mean_and_std_dev(self.logger, self.save_dirs, self.im_spacing,
-                                           mean, std_dev, fixed['mask'],  'VI')
+                                           mean, std_dev, moving['mask'],  'VI')
 
         """
         speed
@@ -446,7 +446,7 @@ class Trainer(BaseTrainer):
 
         mean, std_dev = calc_posterior_statistics(samples)
         save_displacement_mean_and_std_dev(self.logger, self.save_dirs, self.im_spacing,
-                                           mean, std_dev, fixed['mask'], 'MCMC')
+                                           mean, std_dev, moving['mask'], 'MCMC')
 
         """
         speed
