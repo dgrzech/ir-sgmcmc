@@ -256,3 +256,41 @@ def log_sample(writer, chain_idx, im_moving_warped, v_norm, displacement_norm, l
 
     writer.add_figure(f'MCMC/chain_{chain_idx}/samples',
                       sample_grid(im_moving_warped_slices, v_norm_slices, displacement_norm_slices, log_det_J_slices))
+
+
+def summary_stats_grid(displacement_mean_slices, displacement_std_dev_slices):
+    fig, axs = plt.subplots(nrows=2, ncols=3, sharex=True, sharey=True, figsize=(8, 8))
+
+    cols = ['axial', 'coronal', 'sagittal']
+    rows = ['displacement_mean', 'displacement_std_dev']
+
+    for ax, col in zip(axs[0], cols):
+        ax.set_title(col)
+
+    for ax, row in zip(axs[:, 0], rows):
+        ax.set_xticks([], minor=False)
+        ax.set_xticks([], minor=True)
+
+        ax.set_yticks([], minor=False)
+        ax.set_yticks([], minor=True)
+
+        ax.set_ylabel(row, rotation=90, size='large')
+
+    for i in range(3):
+        axs[0, i].imshow(im_flip(displacement_mean_slices[i]), cmap='hot')
+        axs[1, i].imshow(im_flip(displacement_std_dev_slices[i]), cmap='hot')
+
+    return fig
+
+
+def log_displacement_mean_and_std_dev(writer, displacement_mean, displacement_std_dev, model):
+    displacement_mean_norm = calc_norm(displacement_mean.unsqueeze(0)).cpu().numpy()
+    displacement_std_dev_norm = calc_norm(displacement_std_dev.unsqueeze(0)).cpu().numpy()
+
+    mid_idxs = get_im_or_field_mid_slices_idxs(displacement_mean_norm)
+
+    displacement_mean_norm_slices = get_slices(displacement_mean_norm[0, 0], mid_idxs)
+    displacement_std_dev_norm_slices = get_slices(displacement_std_dev_norm[0, 0], mid_idxs)
+
+    writer.add_figure(f'{model}/summary_stats',
+                      summary_stats_grid(displacement_mean_norm_slices, displacement_std_dev_norm_slices))

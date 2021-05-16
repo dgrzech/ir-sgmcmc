@@ -195,6 +195,18 @@ def save_moving_mask(save_dirs, spacing, mask_moving):
     save_im_to_disk(mask_moving, im_path, spacing)
 
 
+def save_variational_posterior_mean(save_dirs, spacing, im_moving_warped, displacement):
+    im_moving_warped = im_moving_warped[0, 0].cpu().numpy()
+    displacement = displacement * spacing[0]
+    displacement = displacement[0].cpu().numpy()
+
+    name = f'im_moving_warped_mu'
+    save_im(save_dirs, spacing, im_moving_warped, name)
+
+    name = 'displacement_mu'
+    save_field(save_dirs, spacing, displacement, name)
+
+
 """
 samples
 """

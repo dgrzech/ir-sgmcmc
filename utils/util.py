@@ -217,7 +217,7 @@ def calc_norm(field):
     calculate the voxel-wise norm of vectors in a batch of 3D fields
     """
 
-    norms = torch.empty(size=(field.shape[0], 1, field.shape[2], field.shape[3], field.shape[4]), device=field.device)
+    norms = torch.empty(size=(field.shape[0], 1, *field.shape[2:]), device=field.device)
 
     for batch_idx in range(field.shape[0]):
         norms[batch_idx, ...] = torch.norm(field[batch_idx], p=2, dim=0)

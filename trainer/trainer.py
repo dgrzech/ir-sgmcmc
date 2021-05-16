@@ -4,11 +4,13 @@ import numpy as np
 import torch
 
 from base import BaseTrainer
-from logger import log_fields, log_hist_res, log_images, log_sample, save_displacement_mean_and_std_dev, \
-    save_fixed_im, save_fixed_mask, save_moving_im, save_moving_mask, save_sample
-from utils import SGLD, SobolevGrad, Sobolev_kernel_1D, add_noise_uniform_field, calc_posterior_statistics,\
-    calc_VD_factor, calc_metrics, calc_no_non_diffeomorphic_voxels, calc_norm, max_field_update, rescale_residuals, \
-    sample_q_v
+from logger import log_displacement_mean_and_std_dev, log_fields, log_hist_res, log_images, log_sample, \
+    save_displacement_mean_and_std_dev, save_fixed_im, save_fixed_mask, save_moving_im, save_moving_mask, save_sample, \
+    save_variational_posterior_mean
+from utils import SGLD, SobolevGrad, Sobolev_kernel_1D, \
+    add_noise_uniform_field, calc_posterior_statistics,\
+    calc_VD_factor, calc_metrics, calc_no_non_diffeomorphic_voxels, calc_norm, max_field_update,\
+    rescale_residuals, sample_q_v
 
 
 class Trainer(BaseTrainer):
@@ -251,11 +253,21 @@ class Trainer(BaseTrainer):
 
             save_sample(self.save_dirs, self.im_spacing, test_sample_no, im_moving_warped, displacement, log_det_J, 'VI')
 
+        self.logger.info('\nsaving the displacement and warped moving image corresponding to the mean of the approximate variational posterior..')
+
+        mu_v = var_params_q_v['mu']
+        mu_v_smoothed = SobolevGrad.apply(mu_v, self.S, self.padding)
+        transformation, displacement = self.transformation_module(mu_v_smoothed)
+        im_moving_warped = self.registration_module(moving['im'], transformation)
+
+        save_variational_posterior_mean(self.save_dirs, self.im_spacing, im_moving_warped, displacement)
+
         self.logger.info('\ncalculating sample standard deviation of the displacement..')
 
         mean, std_dev = calc_posterior_statistics(samples)
+        log_displacement_mean_and_std_dev(self.writer, mean, std_dev, 'VI')
         save_displacement_mean_and_std_dev(self.logger, self.save_dirs, self.im_spacing,
-                                           mean, std_dev, moving['mask'],  'VI')
+                                           mean, std_dev, moving['mask'], 'VI')
 
         """
         speed
@@ -308,11 +320,11 @@ class Trainer(BaseTrainer):
             chain_data_term = data_loss(residuals_masked[idx]).sum() * alpha
             data_term += chain_data_term
 
-            loss_terms['data'].append(chain_data_term.item())
-            loss_terms['reg'].append(reg_term[idx].item())
+            loss_terms['data'].append(chain_data_term)
+            loss_terms['reg'].append(reg_term[idx])
 
-            aux['alpha'].append(alpha.item())
-            aux['reg_energy'].append(log_y[idx].exp().item())
+            aux['alpha'].append(alpha)
+            aux['reg_energy'].append(log_y[idx].exp())
 
         data_term -= self.losses['data']['scale_prior'](data_loss.log_scales).sum()
         data_term -= self.losses['data']['proportion_prior'](data_loss.log_proportions).sum()
@@ -376,29 +388,28 @@ class Trainer(BaseTrainer):
             with torch.no_grad():
                 self.writer.set_step(sample_no)
 
-                # model parameters
-                for idx in range(data_loss.no_components):
-                    self.metrics.update(f'MCMC/GMM/scale_{idx}', data_loss.scales[idx].item())
-                    self.metrics.update(f'MCMC/GMM/proportion_{idx}', data_loss.proportions[idx].item())
+                if self.no_samples_MCMC < 1e4 or (sample_no - 1) % 100 == 0:  # NOTE (DG): the logs are too large otherwise
+                    # model parameters
+                    for idx in range(data_loss.no_components):
+                        self.metrics.update(f'MCMC/GMM/scale_{idx}', data_loss.scales[idx].item())
+                        self.metrics.update(f'MCMC/GMM/proportion_{idx}', data_loss.proportions[idx].item())
 
-                if reg_loss.learnable:
-                    if reg_loss.__class__.__name__ == 'RegLoss_LogNormal':
-                        self.metrics.update('MCMC/reg/loc', reg_loss.loc.item())
-                        self.metrics.update('MCMC/reg/scale', reg_loss.scale.item())
-                    elif reg_loss.__class__.__name__ == 'RegLoss_L2':
-                        self.metrics.update('MCMC/reg/w_reg', reg_loss.log_w_reg.exp().item())
+                    if reg_loss.learnable:
+                        if reg_loss.__class__.__name__ == 'RegLoss_LogNormal':
+                            self.metrics.update('MCMC/reg/loc', reg_loss.loc.item())
+                            self.metrics.update('MCMC/reg/scale', reg_loss.scale.item())
+                        elif reg_loss.__class__.__name__ == 'RegLoss_L2':
+                            self.metrics.update('MCMC/reg/w_reg', reg_loss.log_w_reg.exp().item())
 
-                # losses
-                total_loss = sum(loss_terms['data']) + sum(loss_terms['reg'])
-                self.metrics.update(f'MCMC/avg_loss', total_loss / self.no_chains)
+                    # losses
+                    total_loss = sum(loss_terms['data']) + sum(loss_terms['reg'])
+                    self.metrics.update(f'MCMC/avg_loss', total_loss.item() / self.no_chains)
 
-                for idx in range(self.no_chains):
-                    self.metrics.update(f'MCMC/chain_{idx}/data_term', loss_terms['data'][idx])
-                    self.metrics.update(f'MCMC/chain_{idx}/reg_term', loss_terms['reg'][idx])
-                    self.metrics.update(f'MCMC/chain_{idx}/VD/alpha', aux['alpha'][idx])
-
-                    # other
-                    self.metrics.update(f'MCMC/chain_{idx}/reg/energy', aux['reg_energy'][idx])
+                    for idx in range(self.no_chains):
+                        self.metrics.update(f'MCMC/chain_{idx}/data_term', loss_terms['data'][idx].item())
+                        self.metrics.update(f'MCMC/chain_{idx}/reg_term', loss_terms['reg'][idx].item())
+                        self.metrics.update(f'MCMC/chain_{idx}/VD/alpha', aux['alpha'][idx].item())
+                        self.metrics.update(f'MCMC/chain_{idx}/reg/energy', aux['reg_energy'][idx].item())
 
                 if sample_no > self.no_iters_burn_in:
                     if sample_no % self.log_period_MCMC == 0 or sample_no == self.no_samples_MCMC:
@@ -445,6 +456,7 @@ class Trainer(BaseTrainer):
         self.logger.info('\ncalculating sample standard deviation of the displacement..')
 
         mean, std_dev = calc_posterior_statistics(samples)
+        log_displacement_mean_and_std_dev(self.writer, mean, std_dev, 'MCMC')
         save_displacement_mean_and_std_dev(self.logger, self.save_dirs, self.im_spacing,
                                            mean, std_dev, moving['mask'], 'MCMC')
 
