@@ -50,7 +50,7 @@
 		"args": {
 			"lr_mu": 0.01,
 			"lr_log_var": 0.01,
-			"lr_log_u": 0.01,
+			"lr_u": 0.01,
 			"lr_decay": 0.001
 		}
 	},

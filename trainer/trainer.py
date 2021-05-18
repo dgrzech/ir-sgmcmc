@@ -101,7 +101,7 @@ class Trainer(BaseTrainer):
         data_term = data_loss(residuals_masked).sum() * alpha
         reg_term, log_y = reg_loss(v_sample)
         reg_term = reg_term.sum()
-        entropy_term = entropy_loss(sample=v_sample_unsmoothed, mu=var_params_q_v['mu'], log_var=var_params_q_v['log_var'], log_u=var_params_q_v['log_u']).sum()
+        entropy_term = entropy_loss(sample=v_sample_unsmoothed, mu=var_params_q_v['mu'], log_var=var_params_q_v['log_var'], u=var_params_q_v['u']).sum()
 
         aux = {'alpha': alpha, 'reg_energy': log_y.exp(), 'no_non_diffeomorphic_voxels': no_non_diffeomorphic_voxels, 'residuals': residuals_masked}
         loss_terms = {'data': data_term, 'reg': reg_term, 'entropy': entropy_term}
@@ -152,7 +152,7 @@ class Trainer(BaseTrainer):
 
             # entropy
             entropy_term = (loss_terms1['entropy'] + loss_terms2['entropy']) / 2.0
-            entropy_term += entropy_loss(log_var=var_params_q_v['log_var'], log_u=var_params_q_v['log_u']).sum()
+            entropy_term += entropy_loss(log_var=var_params_q_v['log_var'], u=var_params_q_v['u']).sum()
 
             # total loss
             loss = data_term + reg_term - entropy_term

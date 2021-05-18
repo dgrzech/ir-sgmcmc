@@ -189,7 +189,7 @@ def log_fields(writer, var_params_batch, displacement_batch, log_det_J_batch):
 
     mu_v_norm = calc_norm(var_params_batch['mu'])[0, 0].cpu().numpy()
     sigma_v_norm = calc_norm(torch.exp(0.5 * var_params_batch['log_var']))[0, 0].cpu().numpy()
-    u_v_norm = calc_norm(torch.exp(var_params_batch['log_u']))[0, 0].cpu().numpy()
+    u_v_norm = calc_norm(var_params_batch['u'])[0, 0].cpu().numpy()
 
     displacement_norm = calc_norm(displacement_batch)[0, 0].cpu().numpy()
     log_det_J = log_det_J_batch[0].cpu().numpy()

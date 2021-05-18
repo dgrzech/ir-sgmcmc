@@ -8,10 +8,9 @@ def sample_q_v(var_params_q_v, no_samples=1):
 
     mu_v = var_params_q_v['mu']
     log_var_v = var_params_q_v['log_var']
-    log_u_v = var_params_q_v['log_u']
+    u_v = var_params_q_v['u']
 
     sigma_v = torch.exp(0.5 * log_var_v)
-    u_v = torch.exp(log_u_v)
     
     eps = torch.randn_like(sigma_v)
     x = torch.randn(1, device=u_v.device)
