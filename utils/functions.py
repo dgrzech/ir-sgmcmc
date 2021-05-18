@@ -43,8 +43,8 @@ def Sobolev_kernel_1D(_s, _lambda):
 
     half = v * inv_sqrt_w
 
-    smoothing_kernel = half.dot(half[_kernel_sz // 2])  # not very pretty but I only need the middle column of half half^t
-    smoothing_kernel_sqrt = half.dot(v[_kernel_sz // 2])  # not very pretty because it breaks the symmetry
+    smoothing_kernel = half.dot(half[_s])  # not very pretty but I only need the middle column of half half^t
+    smoothing_kernel_sqrt = half.dot(v[_s])  # not very pretty because it breaks the symmetry
 
     return smoothing_kernel / np.sum(smoothing_kernel), smoothing_kernel_sqrt / np.sum(smoothing_kernel_sqrt)
 
