@@ -1,5 +1,5 @@
 {
-	"name": "SG_MCMC",
+	"name": "experiment1",
 	"data_loss": {
 		"type": "GMM",
 		"args": {
@@ -22,16 +22,26 @@
 		}
 	},
 	"reg_loss": {
-		"type": "RegLoss_L2",
+		"type": "RegLoss_LogNormal",
 		"args": {
 			"diff_op": "GradientOperator",
 			"w_reg": 1.4,
 			"learnable": true
 		}
 	},
-	"reg_loss_w_reg_prior": {
-		"type": "LogPrecisionExpGammaPrior",
-		"args": {}
+	"reg_loss_loc_prior": {
+		"type": "LogEnergyExpGammaPrior",
+		"args": {
+			"w_reg": 1.4,
+			"learnable": false
+		}
+	},
+	"reg_loss_scale_prior": {
+		"type": "LogScaleNormalPrior",
+		"args": {
+			"loc": 2.8,
+			"scale": 5.0
+		}
 	},
 	"entropy_loss": {
 		"type": "EntropyMultivariateNormal",
@@ -65,7 +75,8 @@
 	"optimizer_reg": {
 		"type": "Adam",
 		"args": {
-			"lr_log_w_reg": 0.01,
+			"lr_loc": 0.01,
+			"lr_log_scale": 0.01,
 			"lr_decay": 0.001
 		}
 	},

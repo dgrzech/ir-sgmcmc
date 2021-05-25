@@ -1,0 +1,100 @@
+{
+	"name": "experiment2_M2",
+	"data_loss": {
+		"type": "GMM",
+		"args": {
+			"no_components": 4,
+			"s": 1
+		}
+	},
+	"data_loss_scale_prior": {
+		"type": "LogScaleNormalPrior",
+		"args": {
+			"loc": 0.0,
+			"scale": 2.3
+		}
+	},
+	"data_loss_proportion_prior": {
+		"type": "DirichletPrior",
+		"args": {
+			"no_classes": 4,
+			"alpha": 0.5
+		}
+	},
+	"reg_loss": {
+		"type": "RegLoss_L2",
+		"args": {
+			"diff_op": "GradientOperator",
+			"w_reg": 2.0
+		}
+	},
+	"entropy_loss": {
+		"type": "EntropyMultivariateNormal",
+		"args": {}
+	},
+	"transformation_module": {
+		"type": "SVF_3D",
+		"args": {}
+	},
+	"registration_module": {
+		"type": "RegistrationModule",
+		"args": {}
+	},
+	"optimizer_q_v": {
+		"type": "Adam",
+		"args": {
+			"lr_mu": 0.01,
+			"lr_log_var": 0.01,
+			"lr_u": 0.01,
+			"lr_decay": 0.001
+		}
+	},
+	"optimizer_GMM": {
+		"type": "Adam",
+		"args": {
+			"lr_log_std": 0.2,
+			"lr_logits": 0.2,
+			"lr_decay": 0.001
+		}
+	},
+	"optimizer_SG_MCMC": {
+		"type": "SGD",
+		"args": {
+			"lr": 0.4
+		}
+	},
+	"data_loader": {
+		"type": "BiobankDataLoader",
+		"args": {
+			"data_dir": "/vol/bitbucket/dig15/datasets/mine/biobank/biobank_01_3",
+			"dims": [128, 128, 128],
+			"sigma_v_init": 0.5,
+			"u_v_init": 0.1
+		}
+	},
+	"Sobolev_grad": {
+		"enabled": true,
+		"s": 3,
+		"lambda": 0.5
+	},
+	"virtual_decimation": true,
+	"trainer": {
+		"VI": true,
+		"MCMC": false,
+		"MCMC_init": "VI",
+		"no_iters_VI": 1024,
+		"no_samples_VI_test": 100,
+		"no_chains": 2,
+		"no_iters_burn_in": 100000,
+		"no_samples_MCMC": 1000000,
+		"log_period_VI": 128,
+		"log_period_MCMC": 20000,
+		"uniform_noise": {
+			"enabled": true,
+			"magnitude": 0.1
+		},
+		"tensorboard": true,
+		"verbosity": 2,
+		"save_dir": "saved/"
+	}
+}

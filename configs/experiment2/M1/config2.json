@@ -1,10 +1,10 @@
 {
-	"name": "SG_MCMC",
+	"name": "experiment2_M1",
 	"data_loss": {
 		"type": "GMM",
 		"args": {
 			"no_components": 4,
-			"s": 1
+			"s": 2
 		}
 	},
 	"data_loss_scale_prior": {
@@ -25,14 +25,14 @@
 		"type": "RegLoss_LogNormal",
 		"args": {
 			"diff_op": "GradientOperator",
-			"w_reg": 1.4,
+			"w_reg": 2.0,
 			"learnable": true
 		}
 	},
 	"reg_loss_loc_prior": {
 		"type": "LogEnergyExpGammaPrior",
 		"args": {
-			"w_reg": 1.4,
+			"w_reg": 2.0,
 			"learnable": false
 		}
 	},
@@ -89,7 +89,7 @@
 	"data_loader": {
 		"type": "BiobankDataLoader",
 		"args": {
-			"data_dir": "/vol/bitbucket/dig15/datasets/mine/biobank/biobank_01",
+			"data_dir": "/vol/bitbucket/dig15/datasets/mine/biobank/biobank_01_2",
 			"dims": [128, 128, 128],
 			"sigma_v_init": 0.5,
 			"u_v_init": 0.1
@@ -103,7 +103,7 @@
 	"virtual_decimation": true,
 	"trainer": {
 		"VI": true,
-		"MCMC": true,
+		"MCMC": false,
 		"MCMC_init": "VI",
 		"no_iters_VI": 1024,
 		"no_samples_VI_test": 100,
