@@ -25,14 +25,14 @@
 		"type": "RegLoss_LogNormal",
 		"args": {
 			"diff_op": "GradientOperator",
-			"w_reg": 1.4,
+			"w_reg": 1.6,
 			"learnable": true
 		}
 	},
 	"reg_loss_loc_prior": {
 		"type": "LogEnergyExpGammaPrior",
 		"args": {
-			"w_reg": 1.4,
+			"w_reg": 1.6,
 			"learnable": false
 		}
 	},
@@ -60,7 +60,8 @@
 		"args": {
 			"lr_mu": 0.01,
 			"lr_log_var": 0.01,
-			"lr_u": 0.01
+			"lr_u": 0.01,
+			"lr_decay": 0.001
 		}
 	},
 	"optimizer_GMM": {
